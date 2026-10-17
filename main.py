@@ -2,6 +2,8 @@
 import argparse
 import json
 
+import actions
+import calendar_sync
 import config
 import db
 import pipeline
@@ -23,6 +25,11 @@ DATA_TABLES = ["events", "outreach", "actions_log", "processed_emails", "company
 def demo_reset(conn):
     """Wipe applications and events (keeping settings like the chat and sheet IDs), seed the demo
     starting point, and clear the tracker sheet so it mirrors the fresh database."""
+    adapter = actions.get_actions()
+    removed = 0
+    for row in conn.execute("SELECT calendar_event_id FROM events WHERE calendar_event_id IS NOT NULL").fetchall():
+        _, entry = actions.call(adapter, "delete_event", event_id=row["calendar_event_id"])
+        removed += entry[-1]
     for table in DATA_TABLES:
         conn.execute(f"DELETE FROM {table}")
     conn.execute("DELETE FROM sqlite_sequence")
@@ -33,7 +40,9 @@ def demo_reset(conn):
     tracker = trackers.get_tracker(conn)
     tracker.clear()
     trackers.sync_tracker(conn, tracker)
-    print(f"Demo reset: {len(db.list_applications(conn))} applications seeded, tracker cleared and resynced.")
+    added = calendar_sync.sync_calendar(conn, adapter)
+    print(f"Demo reset: {len(db.list_applications(conn))} applications seeded, tracker cleared and resynced, "
+          f"{removed} old calendar events removed, {added} added.")
 
 
 def replay_fixtures(conn):
@@ -82,7 +91,12 @@ def main():
         print(f"Tracker: {trackers.tracker_url(conn)} ({trackers.sync_tracker(conn, tracker)} rows synced)")
     except Exception as e:
         print(f"Tracker unavailable, continuing without it: {e}")
-    telegram_bot.run(conn, tracker)
+    adapter = actions.get_actions()
+    try:
+        print(f"Calendar: {calendar_sync.sync_calendar(conn, adapter)} events synced")
+    except Exception as e:
+        print(f"Calendar sync failed, will retry while running: {e}")
+    telegram_bot.run(conn, tracker, adapter)
 
 
 if __name__ == "__main__":

@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS events (
     location_or_link  TEXT,
     calendar_event_id TEXT,
     email_received_at TEXT,  -- received time of the email that last set this event
+    calendar_dirty    INTEGER NOT NULL DEFAULT 1,  -- 1 until the calendar has this version
     reminded_24h      INTEGER NOT NULL DEFAULT 0,
     reminded_2h       INTEGER NOT NULL DEFAULT 0,
     called            INTEGER NOT NULL DEFAULT 0,
@@ -95,9 +96,19 @@ def connect(path=None):
     return conn
 
 
+# Columns added after a table first shipped: CREATE TABLE IF NOT EXISTS won't add them to an
+# existing database, so add them here instead of deleting jobby.db.
+MIGRATIONS = [
+    ("events", "calendar_dirty", "INTEGER NOT NULL DEFAULT 1"),
+]
+
+
 def init_db(path=None):
     conn = connect(path)
     conn.executescript(SCHEMA)
+    for table, column, decl in MIGRATIONS:
+        if column not in {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
     conn.commit()
     return conn
 
@@ -143,6 +154,19 @@ def insert_event(conn, **fields):
 def update_event(conn, event_id, **fields):
     sets = ", ".join(f'"{k}" = ?' for k in fields)
     conn.execute(f"UPDATE events SET {sets} WHERE id = ?", (*fields.values(), event_id))
+
+
+def dirty_events(conn):
+    """Events whose latest version is not on the calendar yet, with their application."""
+    return conn.execute(
+        "SELECT e.*, a.company, a.role, a.next_step FROM events e JOIN applications a ON a.id = e.application_id "
+        "WHERE e.calendar_dirty = 1 AND e.start IS NOT NULL ORDER BY e.id").fetchall()
+
+
+def log_action(conn, backend, action, request, result, success):
+    conn.execute("INSERT INTO actions_log (backend, action, request, result, success) VALUES (?, ?, ?, ?, ?)",
+                 (backend, action, request, result, int(success)))
+    conn.commit()
 
 
 def latest_event(conn, app_id, event_type):

@@ -1,5 +1,7 @@
-"""Flow B (spec Section 6): one email in, database updated. Calendar, tracker, and Telegram
-outputs hook in here in later milestones."""
+"""Flow B (spec Section 6): one email in, database updated. The calendar, tracker, and Telegram
+are synced from the database afterwards."""
+from datetime import datetime, timedelta
+
 import classifier
 import db
 import dedup
@@ -75,15 +77,26 @@ def _apply(conn, email, result):
                    "old_status": current, "new_status": new}
 
     if outcome["new_status"] == proposed:
-        outcome["event_id"], event_changed = _record_event(conn, app_id, result, category, email["received"])
-        if event_changed and outcome["action"] == "unchanged":
+        outcome["event_id"], event_changed = _record_event(conn, app_id, result["event"], result, category,
+                                                           email["received"])
+        _, deadline_changed = _record_event(conn, app_id, _deadline_event(result), result, category,
+                                            email["received"])
+        if (event_changed or deadline_changed) and outcome["action"] == "unchanged":
             outcome["action"] = "updated"
     return outcome
 
 
-def _record_event(conn, app_id, result, category, received):
+def _deadline_event(result):
+    """A deadline (OA due date, offer reply) becomes a 30-minute calendar block ending at it."""
+    if not result["deadline"]:
+        return None
+    due = datetime.fromisoformat(result["deadline"])
+    return {"type": "deadline", "start": (due - timedelta(minutes=30)).isoformat(), "end": due.isoformat(),
+            "location_or_link": None}
+
+
+def _record_event(conn, app_id, event, result, category, received):
     """Insert or move the event this email describes. Returns (event_id, changed)."""
-    event = result["event"]
     if not event or not event["start"]:
         return None, False
     fields = {
@@ -99,7 +112,10 @@ def _record_event(conn, app_id, result, category, received):
         return existing["id"], False
     if category == "interview_reschedule" and existing:
         # New time means reminders and the prep call must fire again.
-        db.update_event(conn, existing["id"], **fields, reminded_24h=0, reminded_2h=0, called=0)
+        db.update_event(conn, existing["id"], **fields, reminded_24h=0, reminded_2h=0, called=0, calendar_dirty=1)
         return existing["id"], True
-    title = f"{event['type'].capitalize()}: {result['company']} - {result['role']}"
+    if event["type"] == "deadline":
+        title = f"Deadline: {result['next_step'] or 'reply'} - {result['company']}"
+    else:
+        title = f"{event['type'].capitalize()}: {result['company']} - {result['role']}"
     return db.insert_event(conn, application_id=app_id, type=event["type"], title=title, **fields), True

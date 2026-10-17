@@ -42,7 +42,7 @@ def test_final_statuses(conn):
 
 def test_reschedule_moves_the_one_interview_event(conn):
     outcomes = replay(conn)
-    events = conn.execute("SELECT * FROM events").fetchall()
+    events = conn.execute("SELECT * FROM events WHERE type = 'interview'").fetchall()
     assert len(events) == 1
     assert events[0]["start"] == "2026-10-26T11:00:00-07:00"
     assert outcomes[-1]["action"] == "updated"
@@ -97,3 +97,12 @@ def test_two_roles_at_one_company_stay_separate(conn):
     assert dedup.find_application(conn, "Acme", "Data Science Intern")["role"] == "Data Science Intern"
     assert dedup.find_application(conn, "Acme", "Product Design Intern") is None
     assert dedup.find_application(conn, "Acme", None) is None
+
+
+def test_deadlines_become_events(conn):
+    replay(conn)
+    rows = conn.execute("SELECT title, start, \"end\" FROM events WHERE type = 'deadline' ORDER BY id").fetchall()
+    assert [tuple(r) for r in rows] == [
+        ("Deadline: Complete HackerRank OA - Northwind Robotics", "2026-10-19T23:29:00-07:00", "2026-10-19T23:59:00-07:00"),
+        ("Deadline: Sign and return offer letter - Quanta Labs", "2026-10-30T23:29:00-07:00", "2026-10-30T23:59:00-07:00"),
+    ]

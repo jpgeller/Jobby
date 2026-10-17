@@ -11,6 +11,7 @@ from zoneinfo import ZoneInfo
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 
+import calendar_sync
 import config
 import db
 import dedup
@@ -176,23 +177,27 @@ def _fmt_time(value):
 
 # ---------- Telegram wiring ----------
 
-def build_app(conn, tracker=None):
+def build_app(conn, tracker=None, adapter=None):
     app = Application.builder().token(config.TELEGRAM_BOT_TOKEN).build()
     sync_lock = asyncio.Lock()  # a timer sync and a command sync must not both append rows
 
     async def sync_tracker(context=None):
-        if tracker is None:
-            return
+        """Mirror the database to the tracker sheet and the calendar."""
         async with sync_lock:
-            try:
-                rows = trackers.rows_to_sync(conn)
-                row_ids = await asyncio.to_thread(tracker.sync, rows)
-                trackers.save_row_ids(conn, row_ids)
-            except Exception:
-                log.exception("Tracker sync failed; will retry next cycle")
+            if tracker is not None:
+                try:
+                    rows = trackers.rows_to_sync(conn)
+                    row_ids = await asyncio.to_thread(tracker.sync, rows)
+                    trackers.save_row_ids(conn, row_ids)
+                except Exception:
+                    log.exception("Tracker sync failed; will retry next cycle")
+            if adapter is not None:
+                work = calendar_sync.plan(conn)
+                if work:
+                    results = await asyncio.to_thread(calendar_sync.execute, adapter, work)
+                    calendar_sync.save(conn, results)
 
-    if tracker is not None:
-        app.job_queue.run_repeating(sync_tracker, interval=config.POLL_MINUTES * 60, first=1)
+    app.job_queue.run_repeating(sync_tracker, interval=config.POLL_MINUTES * 60, first=1)
 
     inbox_lock = asyncio.Lock()
 
@@ -322,9 +327,9 @@ def build_app(conn, tracker=None):
     return app
 
 
-def run(conn, tracker=None):
+def run(conn, tracker=None, adapter=None):
     if not config.TELEGRAM_BOT_TOKEN:
         print("TELEGRAM_BOT_TOKEN is not set in .env, so the bot is not running.")
         return
     print("Telegram bot running. Press Ctrl+C to stop.")
-    build_app(conn, tracker).run_polling()
+    build_app(conn, tracker, adapter).run_polling()
