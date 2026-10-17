@@ -37,7 +37,7 @@ def save(conn, results):
     done = 0
     for event_id, action, result, log_entry in results:
         actions.record(conn, log_entry)
-        if not log_entry[-1]:
+        if not actions.succeeded(log_entry):
             continue
         fields = {"calendar_dirty": 0}
         if action == "create_event":

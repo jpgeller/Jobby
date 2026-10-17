@@ -25,11 +25,12 @@ DATA_TABLES = ["events", "outreach", "actions_log", "processed_emails", "company
 def demo_reset(conn):
     """Wipe applications and events (keeping settings like the chat and sheet IDs), seed the demo
     starting point, and clear the tracker sheet so it mirrors the fresh database."""
-    adapter = actions.get_actions()
+    # Setup, not the demo itself: use Google directly so the reset is fast and predictable.
+    adapter = actions.get_actions(backend="google")
     removed = 0
     for row in conn.execute("SELECT calendar_event_id FROM events WHERE calendar_event_id IS NOT NULL").fetchall():
-        _, entry = actions.call(adapter, "delete_event", event_id=row["calendar_event_id"])
-        removed += entry[-1]
+        _, entries = actions.call(adapter, "delete_event", event_id=row["calendar_event_id"])
+        removed += actions.succeeded(entries)
     for table in DATA_TABLES:
         conn.execute(f"DELETE FROM {table}")
     conn.execute("DELETE FROM sqlite_sequence")

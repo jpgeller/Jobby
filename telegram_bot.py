@@ -434,12 +434,12 @@ def build_app(conn, tracker=None, adapter=None):
             try:
                 my_address = await asyncio.to_thread(google_auth.my_address) if config.OUTREACH_SEND_TO_SELF else None
                 request = outreach.send_request(conn, oid, my_address)
-                sent_id, entry = await asyncio.to_thread(actions.call, adapter, "send_email", **request)
-                actions.record(conn, entry)
+                sent_id, entries = await asyncio.to_thread(actions.call, adapter, "send_email", **request)
+                actions.record(conn, entries)
             except Exception:
                 log.exception("Outreach %s could not be sent", oid)
-                entry = (None, None, None, None, False)
-            if entry[-1]:
+                entries = []
+            if actions.succeeded(entries):
                 outreach.mark_sent(conn, oid, sent_id)
                 await query.edit_message_text(query.message.text.removesuffix("\n\nSending...") +
                                               f"\n\nSent to {request['to']}.")
