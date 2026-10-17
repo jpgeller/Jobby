@@ -14,6 +14,7 @@ from telegram.ext import Application, CallbackQueryHandler, CommandHandler, Cont
 
 import actions
 import calendar_sync
+import classifier
 import config
 import db
 import dedup
@@ -239,7 +240,10 @@ def build_app(conn, tracker=None, adapter=None):
             count, new_interviews = 0, []
             for email in sorted(emails, key=lambda e: e["received"]):
                 try:
-                    outcome = pipeline.process_email(conn, email)
+                    # The Claude call runs in a worker thread so the bot keeps answering during a
+                    # big first sync; the database writes stay here on the main thread.
+                    result = await asyncio.to_thread(classifier.classify_email, email)
+                    outcome = pipeline.process_email(conn, email, result)
                 except Exception:
                     log.exception("Could not process email %s", email["id"])
                     continue
@@ -427,10 +431,14 @@ def build_app(conn, tracker=None, adapter=None):
             if not ok:
                 return
             await query.edit_message_text(query.message.text + "\n\nSending...")
-            my_address = await asyncio.to_thread(google_auth.my_address) if config.OUTREACH_SEND_TO_SELF else None
-            request = outreach.send_request(conn, oid, my_address)
-            sent_id, entry = await asyncio.to_thread(actions.call, adapter, "send_email", **request)
-            actions.record(conn, entry)
+            try:
+                my_address = await asyncio.to_thread(google_auth.my_address) if config.OUTREACH_SEND_TO_SELF else None
+                request = outreach.send_request(conn, oid, my_address)
+                sent_id, entry = await asyncio.to_thread(actions.call, adapter, "send_email", **request)
+                actions.record(conn, entry)
+            except Exception:
+                log.exception("Outreach %s could not be sent", oid)
+                entry = (None, None, None, None, False)
             if entry[-1]:
                 outreach.mark_sent(conn, oid, sent_id)
                 await query.edit_message_text(query.message.text.removesuffix("\n\nSending...") +

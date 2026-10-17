@@ -16,15 +16,17 @@ def source_from_sender(sender):
     return "direct"
 
 
-def process_email(conn, email):
+def process_email(conn, email, result=None):
     """Classify one email and write the result. Safe to call twice for the same email.
+    Pass `result` (from classifier.classify_email) to skip classifying here, e.g. when the
+    Claude call already ran in a worker thread.
 
     Returns a dict with `action`: already_processed | ignored | needs_review | recruiter_lead |
     created | updated | unchanged, plus application_id, old_status, new_status, event_id."""
     if db.is_email_processed(conn, email["id"]):
         return {"action": "already_processed"}
 
-    result = classifier.classify_email(email)
+    result = result or classifier.classify_email(email)
     outcome = _apply(conn, email, result)
     label = "needs_review" if outcome["action"] == "needs_review" else result["category"]
     db.mark_email_processed(conn, email["id"], label, outcome.get("application_id"),
