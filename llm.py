@@ -157,7 +157,7 @@ def _mock_research(task, prompt):
         raise LLMError(f"No mock research for task {task!r}")
     company = _field(prompt, "Company")
     slug = re.sub(r"[^a-z0-9]+", "-", company.lower()).strip("-")
-    text = (FIXTURES_DIR / "llm" / "research_mock.md").read_text().format(company=company)
+    text = (FIXTURES_DIR / "llm" / "research_mock.md").read_text().format(company=company, slug=slug)
     sources = [{"title": f"{company} - About", "url": f"https://{slug}.example/about"},
                {"title": f"{company} engineering blog", "url": f"https://{slug}.example/blog"}]
     return text, sources
@@ -200,6 +200,16 @@ def _mock(task, prompt):
         return json.dumps(response)
     if task == "parse_screenshot":
         return (FIXTURES_DIR / "screenshots" / "handshake_mock.json").read_text()
+    if task in ("write_outreach", "revise_outreach"):
+        company, role = _field(prompt, "Company"), _field(prompt, "Role")
+        body = (f"Hi,\n\nI applied for the {role} role at {company} and wanted to share why I'm excited about it. "
+                f"[MOCK: one specific reason from the research goes here.] I recently built Jobby, an agent "
+                f"that tracks internship applications end to end, and I'd love to bring that kind of work to "
+                f"your team.\n\nThank you for your time!\nJoão")
+        if task == "revise_outreach":
+            change = prompt.rsplit("instructions from the student:", 1)[-1].strip()
+            body += f"\n\n[MOCK REVISION - asked for: {change}]"
+        return json.dumps({"subject": f"{role} application - João", "body": body})
     if task == "write_prep":
         company, role = _field(prompt, "Company"), _field(prompt, "Role")
         return (FIXTURES_DIR / "llm" / "prep_mock.md").read_text().format(company=company, role=role)

@@ -32,6 +32,9 @@ GMAIL_SCOPES = [s.strip() for s in _get("GMAIL_SCOPES", "gmail.readonly,gmail.se
 TIMEZONE = _get("TIMEZONE", "America/Los_Angeles")
 POLL_MINUTES = int(_get("POLL_MINUTES", "5"))
 OUTREACH_MAX_PER_WEEK = int(_get("OUTREACH_MAX_PER_WEEK", "3"))
+# While true, approved outreach goes to your own address instead of the recruiter (spec: "send to my
+# own address first"). Set OUTREACH_SEND_TO_SELF=false in .env only when you're ready for real sends.
+OUTREACH_SEND_TO_SELF = _get("OUTREACH_SEND_TO_SELF", "true").lower() != "false"
 
 DB_PATH = ROOT / _get("DB_PATH", "jobby.db")
 PREP_DIR = ROOT / "prep"

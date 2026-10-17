@@ -37,6 +37,17 @@ def service(name, version):
     return build(name, version, credentials=credentials(), cache_discovery=False)
 
 
+_my_address = None
+
+
+def my_address():
+    """The signed-in Gmail address."""
+    global _my_address
+    if _my_address is None:
+        _my_address = service("gmail", "v1").users().getProfile(userId="me").execute()["emailAddress"]
+    return _my_address
+
+
 if __name__ == "__main__":
     credentials()
     print(f"Google login saved to {TOKEN_FILE.name}.")

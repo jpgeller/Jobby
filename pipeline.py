@@ -27,7 +27,8 @@ def process_email(conn, email):
     result = classifier.classify_email(email)
     outcome = _apply(conn, email, result)
     label = "needs_review" if outcome["action"] == "needs_review" else result["category"]
-    db.mark_email_processed(conn, email["id"], label, outcome.get("application_id"))
+    db.mark_email_processed(conn, email["id"], label, outcome.get("application_id"),
+                            from_address=email.get("from"), thread_id=email.get("thread_id"))
     conn.commit()
     outcome["classification"] = result
     return outcome

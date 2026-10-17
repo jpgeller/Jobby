@@ -10,7 +10,10 @@ import config
 
 QUERY = ('newer_than:30d (from:handshake OR from:joinhandshake.com OR from:interstride '
          'OR subject:(application OR interview OR assessment OR "coding challenge" '
-         'OR "next steps" OR offer OR "thank you for applying" OR unfortunately))')
+         'OR "next steps" OR offer OR "thank you for applying" OR unfortunately)) '
+         # Skip mail Jobby sent: real outreach only sits in Sent, and test-mode outreach copies are
+         # tagged. Emails you send yourself still count, since they also land in the inbox.
+         '(in:inbox OR -in:sent) -subject:"jobby outreach test"')
 
 # In mock mode the classifier can't really read emails, so only emails whose subject carries
 # this marker are processed. Everything else waits, unprocessed, until live mode.

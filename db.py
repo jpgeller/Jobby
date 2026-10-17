@@ -100,6 +100,12 @@ def connect(path=None):
 # existing database, so add them here instead of deleting jobby.db.
 MIGRATIONS = [
     ("events", "calendar_dirty", "INTEGER NOT NULL DEFAULT 1"),
+    ("processed_emails", "from_address", "TEXT"),
+    ("processed_emails", "thread_id", "TEXT"),
+    ("outreach", "thread_id", "TEXT"),
+    ("outreach", "reason", "TEXT"),
+    ("company_research", "contact_email", "TEXT"),
+    ("company_research", "contact_url", "TEXT"),
 ]
 
 
@@ -193,6 +199,6 @@ def is_email_processed(conn, message_id):
     return conn.execute("SELECT 1 FROM processed_emails WHERE gmail_message_id = ?", (message_id,)).fetchone() is not None
 
 
-def mark_email_processed(conn, message_id, classification, app_id=None):
-    conn.execute("INSERT INTO processed_emails (gmail_message_id, classification, application_id) VALUES (?, ?, ?)",
-                 (message_id, classification, app_id))
+def mark_email_processed(conn, message_id, classification, app_id=None, from_address=None, thread_id=None):
+    conn.execute("INSERT INTO processed_emails (gmail_message_id, classification, application_id, from_address, "
+                 "thread_id) VALUES (?, ?, ?, ?, ?)", (message_id, classification, app_id, from_address, thread_id))

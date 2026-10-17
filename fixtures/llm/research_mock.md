@@ -4,3 +4,6 @@ SUMMARY:
 RECENT NEWS:
 - [MOCK] {company} announced a new product line this quarter.
 - [MOCK] {company} expanded its university recruiting program for Summer 2027.
+
+RECRUITING CONTACT:
+recruiting@{slug}.example https://{slug}.example/careers

@@ -9,15 +9,18 @@ from datetime import date, datetime, timedelta
 from datetime import time as dt_time
 from zoneinfo import ZoneInfo
 
-from telegram import Update
-from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters
 
+import actions
 import calendar_sync
 import config
 import db
 import dedup
 import gmail_watcher
+import google_auth
 import importer
+import outreach
 import pipeline
 import prep
 import reminders
@@ -37,7 +40,8 @@ HELP = """Commands:
 /import - add applications from Handshake screenshots
 /check - check the inbox for new application emails now
 /prep Company - interview prep guide
-/research Company - what Jobby knows about a company, with sources"""
+/research Company - what Jobby knows about a company, with sources
+/outreach Company [email] - draft an outreach email now (you still approve it)"""
 
 
 # ---------- who may talk to the bot ----------
@@ -329,6 +333,134 @@ def build_app(conn, tracker=None, adapter=None):
             return
         await send(context.bot, research.format_research(name, data))
 
+    # ----- Flow E: outreach, always asks first -----
+    def outreach_buttons(oid):
+        return InlineKeyboardMarkup([[
+            InlineKeyboardButton("Approve", callback_data=f"outreach:approve:{oid}"),
+            InlineKeyboardButton("Edit", callback_data=f"outreach:edit:{oid}"),
+            InlineKeyboardButton("Skip", callback_data=f"outreach:skip:{oid}"),
+        ]])
+
+    async def show_outreach(bot, oid):
+        msg = await bot.send_message(chat_id=allowed_chat_id(conn), text=outreach.preview(conn, oid),
+                                     reply_markup=outreach_buttons(oid), disable_web_page_preview=True)
+        outreach.set_telegram_message(conn, oid, msg.message_id)
+
+    async def suggest_outreach(bot, app_row, manual=False, given_email=None):
+        """Research, pick a contact, draft, and show the draft with buttons. Returns a status line
+        for /outreach, or None if a draft was shown."""
+        data = await get_research(app_row["company"], app_row["role"])
+        if given_email:
+            contact = {"to": given_email, "source": "given by you with /outreach", "thread_id": None,
+                       "reason": "You asked for an outreach draft."}
+        else:
+            contact = outreach.pick_contact(conn, app_row, data, manual=manual)
+        if contact is None:
+            return (f"I don't have a contact for {app_row['company']} (no recruiter has emailed you and the company "
+                    f"doesn't publish one I found). Use /outreach {app_row['company']} name@company.com")
+        email = await asyncio.to_thread(outreach.draft, outreach.build_prompt(app_row, data, contact))
+        oid = outreach.save_suggestion(conn, app_row["id"], contact, email)
+        await show_outreach(bot, oid)
+        return None
+
+    async def outreach_job(context):
+        """Daily: suggest outreach where it would help, within the weekly limit."""
+        budget = config.OUTREACH_MAX_PER_WEEK - outreach.suggested_this_week(conn)
+        for app_row in outreach.candidates(conn):
+            if budget <= 0:
+                break
+            try:
+                if await suggest_outreach(context.bot, app_row) is None:
+                    budget -= 1
+            except Exception:
+                log.exception("Outreach suggestion failed for %s", app_row["company"])
+
+    app.job_queue.run_daily(outreach_job, time=dt_time(10, 0, tzinfo=TZ))
+
+    async def outreach_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if str(update.effective_chat.id) != allowed_chat_id(conn):
+            return
+        words = args_text(update).split()
+        given = words.pop() if words and "@" in words[-1] else None
+        company, _, matches = find_by_name(conn, " ".join(words))
+        if not company:
+            await reply(update, "Usage: /outreach Company [email]")
+            return
+        if len(matches) != 1:
+            await reply(update, f"No single application found for {company}. Try /outreach Company | Role.")
+            return
+        app_row = matches[0]
+        if "sent" in outreach.history(conn, app_row["id"]):
+            await reply(update, f"You already sent an outreach email for {app_row['company']} - {app_row['role']}.")
+            return
+        pending = outreach.pending_for(conn, app_row["id"])
+        if pending and not given:
+            await show_outreach(context.bot, pending["id"])
+            return
+        await reply(update, f"Drafting an email for {app_row['company']}...")
+        try:
+            note = await suggest_outreach(context.bot, app_row, manual=True, given_email=given)
+        except Exception:
+            log.exception("Outreach draft failed for %s", app_row["company"])
+            note = f"I couldn't draft an email for {app_row['company']} right now."
+        await reply(update, note)
+
+    async def on_outreach_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        query = update.callback_query
+        if str(query.message.chat.id) != allowed_chat_id(conn):
+            await query.answer()
+            return
+        _, action, oid = query.data.split(":")
+        oid = int(oid)
+        if action == "skip":
+            outreach.skip(conn, oid)
+            await query.answer("Skipped")
+            await query.edit_message_text(query.message.text + "\n\nSkipped. Jobby won't suggest this again.")
+        elif action == "edit":
+            context.chat_data["editing_outreach"] = oid
+            await query.answer()
+            await context.bot.send_message(chat_id=query.message.chat.id,
+                                           text="What should change? Reply in your own words, e.g. \"shorter, and mention my robotics project\".")
+        elif action == "approve":
+            ok, msg = outreach.approve(conn, oid, query.message.chat.id)
+            await query.answer(msg, show_alert=not ok)
+            if not ok:
+                return
+            await query.edit_message_text(query.message.text + "\n\nSending...")
+            my_address = await asyncio.to_thread(google_auth.my_address) if config.OUTREACH_SEND_TO_SELF else None
+            request = outreach.send_request(conn, oid, my_address)
+            sent_id, entry = await asyncio.to_thread(actions.call, adapter, "send_email", **request)
+            actions.record(conn, entry)
+            if entry[-1]:
+                outreach.mark_sent(conn, oid, sent_id)
+                await query.edit_message_text(query.message.text.removesuffix("\n\nSending...") +
+                                              f"\n\nSent to {request['to']}.")
+                await sync_tracker()
+            else:
+                outreach.mark_failed(conn, oid)
+                await query.edit_message_text(query.message.text + "\n\nSending failed. Tap Approve to try again.",
+                                              reply_markup=outreach_buttons(oid))
+
+    async def revise_outreach(update, context, oid, instructions):
+        o = outreach.get(conn, oid)
+        if o is None or o["status"] != "suggested":
+            await reply(update, "That draft was already handled.")
+            return
+        app_row = db.get_application(conn, o["application_id"])
+        data = await get_research(app_row["company"], app_row["role"])
+        contact = {"to": o["to_address"], "source": o["contact_source"], "thread_id": o["thread_id"]}
+        await reply(update, "Redrafting...")
+        email = await asyncio.to_thread(outreach.draft, outreach.build_prompt(app_row, data, contact),
+                                        instructions, {"subject": o["subject"], "body": o["body"]})
+        outreach.update_draft(conn, oid, email)
+        if o["telegram_message_id"]:
+            try:
+                await context.bot.edit_message_reply_markup(chat_id=allowed_chat_id(conn),
+                                                            message_id=int(o["telegram_message_id"]))
+            except Exception:
+                pass  # old message already edited or gone
+        await show_outreach(context.bot, oid)
+
     async def check_now(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if str(update.effective_chat.id) != allowed_chat_id(conn):
             return
@@ -369,6 +501,8 @@ def build_app(conn, tracker=None, adapter=None):
     app.add_handler(CommandHandler("check", check_now))
     app.add_handler(CommandHandler("prep", prep_command))
     app.add_handler(CommandHandler("research", research_command))
+    app.add_handler(CommandHandler("outreach", outreach_command))
+    app.add_handler(CallbackQueryHandler(on_outreach_button, pattern=r"^outreach:"))
 
     # ----- Flow A: screenshot import -----
     def start_import(update, context):
@@ -400,6 +534,10 @@ def build_app(conn, tracker=None, adapter=None):
         await reply(update, session.preview(conn))
 
     async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        editing = context.chat_data.pop("editing_outreach", None)
+        if editing is not None:
+            await revise_outreach(update, context, editing, update.effective_message.text)
+            return
         session = context.chat_data.get("import")
         if session is None:
             await reply(update, HELP)  # free-text Q&A arrives in milestone 13
