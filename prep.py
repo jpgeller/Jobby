@@ -71,6 +71,24 @@ def save_guide(app, event, text):
     return path
 
 
+POINTS_SCHEMA = {
+    "type": "object",
+    "properties": {"points": {"type": "array", "items": {"type": "string"}}},
+    "required": ["points"],
+    "additionalProperties": False,
+}
+
+
+def call_points(company, source_text):
+    """Three short, speakable reminders from the prep guide (or research). Worker-thread safe."""
+    prompt = (f"Company: {company}\n\nFrom this interview prep material, give the 3 most useful things to "
+              "remember right before the interview. Each under 15 words, written to be read aloud: no links, "
+              f"no symbols, no numbering.\n\n{source_text[:6000]}")
+    points = llm.ask_claude_json(prompt, task="call_points", schema=POINTS_SCHEMA, model=config.MODEL_FAST,
+                                 max_tokens=1024)["points"]
+    return [p.strip() for p in points if p.strip()][:3]
+
+
 def latest_saved(company):
     files = sorted(config.PREP_DIR.glob(f"{_slug(company)}_*.md")) if config.PREP_DIR.exists() else []
     return files[-1] if files else None

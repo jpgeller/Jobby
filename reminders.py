@@ -55,6 +55,34 @@ def format_reminder(row, kind):
     return text
 
 
+def due_calls(conn, minutes=None, now=None):
+    """Interviews starting within FO_CALL_MINUTES that haven't had their reminder call."""
+    now = now or datetime.now(TZ)
+    window = timedelta(minutes=minutes or config.FO_CALL_MINUTES)
+    rows = conn.execute(
+        "SELECT e.*, a.company, a.role, a.next_step FROM events e JOIN applications a ON a.id = e.application_id "
+        "WHERE e.type = 'interview' AND e.start IS NOT NULL AND e.called = 0 "
+        "AND a.status NOT IN ('rejected', 'withdrawn')").fetchall()
+    return [r for r in rows if timedelta(0) < datetime.fromisoformat(r["start"]) - now <= window]
+
+
+def call_script(row, points, now=None):
+    """What Fo reads aloud: spoken style, no links (they're on the calendar and Telegram)."""
+    now = now or datetime.now(TZ)
+    start = datetime.fromisoformat(row["start"]).astimezone(TZ)
+    minutes = max(1, round((start - now).total_seconds() / 60))
+    when = f"in about {minutes} minutes" if minutes < 90 else f"at {start.strftime('%-I:%M %p')}"
+    numbered = " ".join(f"{word}, {p.rstrip('.')}." for word, p in zip(["One", "Two", "Three"], points))
+    return (f"Hi, this is Jobby. Your {row['company']} interview for {row['role']} starts {when}, "
+            f"at {start.strftime('%-I:%M %p')} Pacific. Three things to remember. {numbered} "
+            f"The meeting link is in your calendar and on Telegram. Good luck!")
+
+
+def mark_called(conn, row):
+    db.update_event(conn, row["id"], called=1)
+    conn.commit()
+
+
 def daily_digest(conn, upcoming_text, now=None):
     """The 8am message: this week's events and open next steps. None if there is nothing to say."""
     now = now or datetime.now(TZ)

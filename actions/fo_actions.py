@@ -65,8 +65,11 @@ class FoActions(ActionAdapter):
         thread = (f"Send it as a reply in my Gmail thread with id {reply_to_thread_id}.\n"
                   if reply_to_thread_id else "")
         started = int(time.time()) - 5
+        # Jobby only reaches this after the owner tapped Approve on this exact text in Telegram
+        # (outreach.approve + send_request); Fo is told so, plainly, because it rightly asks for consent.
         reply = self._ask(
-            "Send this email now from my connected email account, exactly as written. Do not save it as a draft, "
+            "I reviewed this exact email in Jobby and tapped Approve to send it; this request carries that "
+            "approval. Send it now from my connected email account, exactly as written. Do not save it as a draft, "
             "do not add a signature, do not change any text.\n"
             f"{thread}To: {to}\nSubject: {subject}\nBody:\n{body}\n\n"
             "Reply with one line: SENT_ID: <the sent message id>")
@@ -77,7 +80,16 @@ class FoActions(ActionAdapter):
         raise FoActionError(f"Fo did not send the email: {reply[:300]}")
 
     def call_reminder(self, summary):
-        raise FoActionError("Fo voice calls arrive in milestone 12")
+        """Fo phones the account owner (the number on their Wajo profile) and reads the summary.
+        True only if Fo confirms the call was placed."""
+        reply = self._ask(
+            "Call me now on my own phone number from my profile, and only that number - never anyone else. "
+            "Read me this reminder, then hang up:\n\n"
+            f"\"{summary}\"\n\n"
+            "Reply with one line: CALL_PLACED, or FAILED: <reason>")
+        if "CALL_PLACED" not in reply.upper():
+            raise FoActionError(f"Fo did not confirm the call: {reply[:300]}")
+        return True
 
     # ----- helpers -----
 

@@ -130,3 +130,22 @@ def test_split_message():
 def test_new_interview_detection():
     assert bot.is_new_interview({"new_status": "interview", "old_status": "assessment", "event_id": 1})
     assert not bot.is_new_interview({"new_status": "interview", "old_status": "interview", "event_id": 1})
+
+
+def test_call_due_inside_window_only_once(conn):
+    assert reminders.due_calls(conn, minutes=60, now=INTERVIEW - timedelta(minutes=90)) == []
+    due = reminders.due_calls(conn, minutes=60, now=INTERVIEW - timedelta(minutes=45))
+    assert [r["type"] for r in due] == ["interview"]
+    reminders.mark_called(conn, due[0])
+    assert reminders.due_calls(conn, minutes=60, now=INTERVIEW - timedelta(minutes=30)) == []
+    assert reminders.due_calls(conn, minutes=60, now=INTERVIEW + timedelta(minutes=1)) == []
+
+
+def test_call_script_is_speakable(conn):
+    row = reminders.due_calls(conn, minutes=60, now=INTERVIEW - timedelta(minutes=58))[0]
+    points = prep.call_points(row["company"], "guide text")
+    script = reminders.call_script(row, points, now=INTERVIEW - timedelta(minutes=58))
+    assert script.startswith("Hi, this is Jobby. Your Northwind Robotics interview for Software Engineering Intern, "
+                             "Summer 2027 starts in about 58 minutes, at 3:00 PM Pacific.")
+    assert "One, Lead with why Northwind Robotics" in script and "Three, " in script
+    assert "http" not in script

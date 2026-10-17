@@ -42,7 +42,8 @@ HELP = """Commands:
 /check - check the inbox for new application emails now
 /prep Company - interview prep guide
 /research Company - what Jobby knows about a company, with sources
-/outreach Company [email] - draft an outreach email now (you still approve it)"""
+/outreach Company [email] - draft an outreach email now (you still approve it)
+/call Company - have Fo call you now with a quick prep summary for the next interview"""
 
 
 # ---------- who may talk to the bot ----------
@@ -296,10 +297,49 @@ def build_app(conn, tracker=None, adapter=None):
             conn.commit()
         await send(bot, text)
 
+    async def place_call(bot, row):
+        """Flow C: Fo calls with a spoken summary; if that fails, the same summary goes to Telegram."""
+        reminders.mark_called(conn, row)  # first, so an overlapping job can never call twice
+        saved = prep.latest_saved(row["company"])
+        source = saved.read_text() if saved else ((research.cached(conn, row["company"]) or {}).get("summary") or row["role"])
+        try:
+            points = await asyncio.to_thread(prep.call_points, row["company"], source)
+        except Exception:
+            log.exception("Call points failed for %s", row["company"])
+            points = ["Review your prep guide", "Talk through your approach out loud", "Have your questions ready"]
+        script = reminders.call_script(row, points)
+        placed, entries = await asyncio.to_thread(actions.call, adapter, "call_reminder", summary=script)
+        actions.record(conn, entries)
+        if placed is True:
+            await send(bot, f"Fo is calling you about your {row['company']} interview.")
+        else:
+            link = f"\nLink: {row['location_or_link']}" if row["location_or_link"] else ""
+            await send(bot, f"I couldn't call you, so here's your interview reminder:\n\n{script}{link}")
+
     async def reminder_job(context):
         for row, kind in reminders.due_reminders(conn):
             await send(context.bot, reminders.format_reminder(row, kind))
             reminders.mark_reminded(conn, row, kind)
+        for row in reminders.due_calls(conn):
+            await place_call(context.bot, row)
+
+    async def call_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Demo and on-demand: call now for the application's next interview, whatever the time."""
+        if str(update.effective_chat.id) != allowed_chat_id(conn):
+            return
+        company, _, matches = find_by_name(conn, args_text(update))
+        if len(matches) != 1:
+            await reply(update, f"Usage: /call Company (no single application found for {company or '?'}).")
+            return
+        event = conn.execute(
+            "SELECT e.*, a.company, a.role, a.next_step FROM events e JOIN applications a ON a.id = e.application_id "
+            "WHERE e.application_id = ? AND e.type = 'interview' AND e.start IS NOT NULL ORDER BY e.start DESC LIMIT 1",
+            (matches[0]["id"],)).fetchone()
+        if event is None:
+            await reply(update, f"{matches[0]['company']} has no scheduled interview to call you about.")
+            return
+        await reply(update, "Asking Fo to call you...")
+        await place_call(context.bot, event)
 
     async def digest_job(context):
         await send(context.bot, reminders.daily_digest(conn, format_upcoming(conn)))
@@ -510,6 +550,7 @@ def build_app(conn, tracker=None, adapter=None):
     app.add_handler(CommandHandler("prep", prep_command))
     app.add_handler(CommandHandler("research", research_command))
     app.add_handler(CommandHandler("outreach", outreach_command))
+    app.add_handler(CommandHandler("call", call_command))
     app.add_handler(CallbackQueryHandler(on_outreach_button, pattern=r"^outreach:"))
 
     # ----- Flow A: screenshot import -----

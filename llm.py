@@ -210,6 +210,11 @@ def _mock(task, prompt):
             change = prompt.rsplit("instructions from the student:", 1)[-1].strip()
             body += f"\n\n[MOCK REVISION - asked for: {change}]"
         return json.dumps({"subject": f"{role} application - João", "body": body})
+    if task == "call_points":
+        company = _field(prompt, "Company")
+        return json.dumps({"points": [f"Lead with why {company}, and connect it to Jobby",
+                                      "Talk through your approach before you start coding",
+                                      "Ask what a successful intern project looks like on their team"]})
     if task == "write_prep":
         company, role = _field(prompt, "Company"), _field(prompt, "Role")
         return (FIXTURES_DIR / "llm" / "prep_mock.md").read_text().format(company=company, role=role)

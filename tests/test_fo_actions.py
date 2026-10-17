@@ -67,6 +67,9 @@ class FakeGoogle(ActionAdapter):
         self.sent_by_google.append(subject)
         return "gmsg"
 
+    def call_reminder(self, summary):
+        return False
+
 
 @pytest.fixture
 def google():
@@ -134,3 +137,18 @@ def test_requests_are_fully_specified_and_scoped(google):
 def test_allow_list_still_applies_to_fo(google):
     with pytest.raises(actions.ActionError):
         actions.call(fo(google, "ok"), "make_purchase", item="laptop")
+
+
+def test_call_needs_explicit_confirmation(google):
+    assert actions.call(fo(google, "CALL_PLACED"), "call_reminder", summary="Hi")[0] is True
+    seen = []
+    result, entries = actions.call(fo(google, "I'll call you later today.", effect=seen.append), "call_reminder", summary="Hi")
+    assert result is False  # Google's call_reminder: no call, so the bot sends the summary on Telegram
+    assert [(e[0], e[-1]) for e in entries] == [("fo", False), ("google", True)]
+    assert "only that number - never anyone else" in seen[0]
+
+
+def test_email_request_states_the_approval(google):
+    seen = []
+    actions.call(fo(google, "FAILED: test", effect=seen.append), "send_email", **EMAIL)
+    assert "tapped Approve" in seen[0]
