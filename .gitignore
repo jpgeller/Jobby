@@ -6,3 +6,5 @@ prep/
 __pycache__/
 profile.md
 fo_token.json
+.vscode/
+jobby-spec-v3.pdf

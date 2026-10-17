@@ -7,6 +7,7 @@ import actions
 import calendar_sync
 import config
 import db
+import gmail_watcher
 import pipeline
 import telegram_bot
 import trackers
@@ -39,11 +40,18 @@ def demo_reset(conn):
     emails = {e["id"]: e for e in load_fixture_emails()}
     for email_id in DEMO_SEED:
         pipeline.process_email(conn, emails[email_id])
+    # Old [Jobby test] emails count as handled, so the interview invite only "arrives" when you
+    # send a fresh one during the demo, instead of the moment the bot starts.
+    gmail = gmail_watcher.gmail_service()
+    old_tests = gmail_watcher.list_message_ids(gmail, f'{gmail_watcher.QUERY} subject:"jobby test"')
+    for message_id in old_tests:
+        db.mark_email_processed(conn, message_id, "demo_reset_skip")
+    conn.commit()
     tracker = trackers.get_tracker(conn)
     tracker.clear()
     trackers.sync_tracker(conn, tracker)
     added = calendar_sync.sync_calendar(conn, adapter)
-    print(f"Demo reset: {len(db.list_applications(conn))} applications seeded, tracker cleared and resynced, "
+    print(f"Demo reset: {len(db.list_applications(conn))} applications seeded, {len(old_tests)} old test emails skipped, "
           f"{removed} old calendar events removed, {added} added.")
 
 
