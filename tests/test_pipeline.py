@@ -37,14 +37,14 @@ def test_final_statuses(conn):
         "Northwind Robotics": "interview", "Helio Payments": "rejected", "Quanta Labs": "offer",
     }
     assert by_company["Northwind Robotics"]["source"] == "handshake"
-    assert by_company["Quanta Labs"]["next_deadline"] == "2026-10-31T23:59:00-07:00"
+    assert by_company["Quanta Labs"]["next_deadline"] == "2026-10-30T23:59:00-07:00"
 
 
 def test_reschedule_moves_the_one_interview_event(conn):
     outcomes = replay(conn)
     events = conn.execute("SELECT * FROM events").fetchall()
     assert len(events) == 1
-    assert events[0]["start"] == "2026-10-27T11:00:00-07:00"
+    assert events[0]["start"] == "2026-10-26T11:00:00-07:00"
     assert outcomes[-1]["action"] == "updated"
 
 

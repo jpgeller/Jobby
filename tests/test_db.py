@@ -4,7 +4,7 @@ import db
 def test_init_db_creates_all_tables(tmp_path):
     conn = db.init_db(tmp_path / "test.db")
     assert db.table_names(conn) == [
-        "actions_log", "applications", "company_research", "events", "outreach", "processed_emails",
+        "actions_log", "applications", "company_research", "events", "outreach", "processed_emails", "settings",
     ]
 
 

@@ -5,6 +5,7 @@ import json
 import config
 import db
 import pipeline
+import telegram_bot
 
 FIXTURE_EMAILS = config.ROOT / "fixtures" / "emails"
 
@@ -45,6 +46,9 @@ def main():
 
     if args.replay_fixtures:
         replay_fixtures(conn)
+        return
+
+    telegram_bot.run(conn)
 
 
 if __name__ == "__main__":

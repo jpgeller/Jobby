@@ -74,6 +74,11 @@ CREATE TABLE IF NOT EXISTS company_research (
     researched_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS settings (
+    key   TEXT PRIMARY KEY,
+    value TEXT
+);
+
 CREATE TABLE IF NOT EXISTS processed_emails (
     gmail_message_id TEXT PRIMARY KEY,
     processed_at     TEXT NOT NULL DEFAULT (datetime('now')),
@@ -143,6 +148,19 @@ def update_event(conn, event_id, **fields):
 def latest_event(conn, app_id, event_type):
     return conn.execute("SELECT * FROM events WHERE application_id = ? AND type = ? ORDER BY id DESC LIMIT 1",
                         (app_id, event_type)).fetchone()
+
+
+# ---------- settings ----------
+
+def get_setting(conn, key):
+    row = conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
+    return row["value"] if row else None
+
+
+def set_setting(conn, key, value):
+    conn.execute("INSERT INTO settings (key, value) VALUES (?, ?) "
+                 "ON CONFLICT(key) DO UPDATE SET value = excluded.value", (key, value))
+    conn.commit()
 
 
 # ---------- processed emails ----------
