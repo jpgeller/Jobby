@@ -73,6 +73,11 @@ def _apply(conn, email, result):
                 fields["next_deadline"] = result["deadline"]
         changed = {k: v for k, v in fields.items() if app[k] != v}
         db.update_application(conn, app_id, **changed)
+        if "status" in changed:
+            # The application moved to a new stage, so deadlines from the old one (e.g. the OA
+            # once an interview is booked) no longer need reminders. Calendar events stay.
+            conn.execute("UPDATE events SET reminded_24h = 1, reminded_2h = 1 "
+                         "WHERE application_id = ? AND type = 'deadline'", (app_id,))
         outcome = {"action": "updated" if changed else "unchanged", "application_id": app_id,
                    "old_status": current, "new_status": new}
 

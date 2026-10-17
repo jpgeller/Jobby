@@ -4,3 +4,4 @@ token.json
 *.db
 prep/
 __pycache__/
+profile.md

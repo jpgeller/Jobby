@@ -6,6 +6,7 @@ import asyncio
 import logging
 from collections import Counter
 from datetime import date, datetime, timedelta
+from datetime import time as dt_time
 from zoneinfo import ZoneInfo
 
 from telegram import Update
@@ -18,6 +19,9 @@ import dedup
 import gmail_watcher
 import importer
 import pipeline
+import prep
+import reminders
+import research
 import trackers
 
 log = logging.getLogger(__name__)
@@ -31,7 +35,9 @@ HELP = """Commands:
 /add Company | Role - add an application
 /update Company status - change a status, e.g. /update Northwind rejected
 /import - add applications from Handshake screenshots
-/check - check the inbox for new application emails now"""
+/check - check the inbox for new application emails now
+/prep Company - interview prep guide
+/research Company - what Jobby knows about a company, with sources"""
 
 
 # ---------- who may talk to the bot ----------
@@ -77,8 +83,8 @@ def format_upcoming(conn, now=None, days=7):
         "SELECT e.*, a.company FROM events e JOIN applications a ON a.id = e.application_id "
         "WHERE e.start IS NOT NULL")
     upcoming = sorted(
-        (datetime.fromisoformat(r["start"]), r) for r in rows
-        if now <= datetime.fromisoformat(r["start"]) <= now + timedelta(days=days)
+        (reminders.event_time(r), r) for r in rows
+        if now <= reminders.event_time(r) <= now + timedelta(days=days)
     )
     if not upcoming:
         return f"Nothing scheduled in the next {days} days."
@@ -104,6 +110,26 @@ def add_application(conn, args_text, today=None):
     return f"Added {company} - {role} as applied."
 
 
+def find_by_name(conn, text):
+    """`Company` or `Company | Role` -> (company, role, matching application rows)."""
+    company, _, role = (text or "").partition("|")
+    company, role = company.strip(), role.strip()
+    if role:
+        match = dedup.find_application(conn, company, role)
+        return company, role, [match] if match else []
+    norm = dedup.normalize_company(company)
+    matches = [a for a in db.list_applications(conn) if a["company_norm"] == norm]
+    if not matches:
+        match = dedup.find_application(conn, company, None)
+        matches = [match] if match else []
+    return company, role, matches
+
+
+def is_new_interview(outcome):
+    return (outcome.get("new_status") == "interview" and outcome.get("old_status") != "interview"
+            and outcome.get("event_id") is not None)
+
+
 def update_status(conn, args_text):
     """`/update Company status` or `/update Company | Role status`. Manual updates may move a
     status in any direction, unlike emails."""
@@ -111,18 +137,7 @@ def update_status(conn, args_text):
     if len(words) < 2 or words[-1].lower() not in STATUSES:
         return f"Usage: /update Company status\nStatus is one of: {', '.join(STATUSES)}"
     status = words[-1].lower()
-    company, _, role = " ".join(words[:-1]).partition("|")
-    company, role = company.strip(), role.strip()
-
-    if role:
-        matches = [dedup.find_application(conn, company, role)]
-        matches = [m for m in matches if m]
-    else:
-        norm = dedup.normalize_company(company)
-        matches = [a for a in db.list_applications(conn) if a["company_norm"] == norm]
-        if not matches:
-            match = dedup.find_application(conn, company, None)
-            matches = [match] if match else []
+    company, role, matches = find_by_name(conn, " ".join(words[:-1]))
 
     if not matches:
         return f"No application found for {company}{' - ' + role if role else ''}."
@@ -217,7 +232,7 @@ def build_app(conn, tracker=None, adapter=None):
                 return 0
             if config.LLM_MODE == "mock":  # the query already narrows to test emails; double-check
                 emails = [e for e in emails if gmail_watcher.is_test_email(e)]
-            count = 0
+            count, new_interviews = 0, []
             for email in sorted(emails, key=lambda e: e["received"]):
                 try:
                     outcome = pipeline.process_email(conn, email)
@@ -226,15 +241,93 @@ def build_app(conn, tracker=None, adapter=None):
                     continue
                 count += 1
                 text = format_email_outcome(outcome, email)
-                chat = allowed_chat_id(conn)
-                if text and chat:
-                    await context.bot.send_message(chat_id=chat, text=text, disable_web_page_preview=True)
+                if text and is_new_interview(outcome):
+                    text += "\nPrep guide coming."
+                    new_interviews.append((outcome["application_id"], outcome["event_id"]))
+                await send(context.bot, text)
                 await asyncio.sleep(0)  # let other handlers run between emails
         if count:
             await sync_tracker()
+        for app_id, event_id in new_interviews:
+            context.application.create_task(send_prep(context.bot, app_id, event_id))
         return count
 
     app.job_queue.run_repeating(check_inbox, interval=config.POLL_MINUTES * 60, first=10)
+
+    async def send(bot, text):
+        """Message the owner, split into Telegram-sized pieces."""
+        chat = allowed_chat_id(conn)
+        if not text or not chat:
+            return
+        for chunk in prep.split_message(text):
+            await bot.send_message(chat_id=chat, text=chunk, disable_web_page_preview=True)
+
+    async def get_research(company, role):
+        data = research.cached(conn, company)
+        if data is None:
+            data = await asyncio.to_thread(research.fetch, company, role)
+            research.save(conn, company, data)
+        return data
+
+    async def send_prep(bot, app_id, event_id=None):
+        """Flow D: research the company, write the guide, save it, send it."""
+        app_row = db.get_application(conn, app_id)
+        event = (conn.execute("SELECT * FROM events WHERE id = ?", (event_id,)).fetchone() if event_id
+                 else db.latest_event(conn, app_id, "interview"))
+        try:
+            data = await get_research(app_row["company"], app_row["role"])
+            body = await asyncio.to_thread(prep.write_guide, prep.build_prompt(app_row, event, data))
+        except Exception:
+            log.exception("Prep guide failed for %s", app_row["company"])
+            await send(bot, f"I couldn't write the prep guide for {app_row['company']}. Try /prep {app_row['company']} later.")
+            return
+        text = prep.assemble(app_row, event, body, data)
+        prep.save_guide(app_row, event, text)
+        if event:
+            db.update_event(conn, event["id"], prep_sent=1)
+            conn.commit()
+        await send(bot, text)
+
+    async def reminder_job(context):
+        for row, kind in reminders.due_reminders(conn):
+            await send(context.bot, reminders.format_reminder(row, kind))
+            reminders.mark_reminded(conn, row, kind)
+
+    async def digest_job(context):
+        await send(context.bot, reminders.daily_digest(conn, format_upcoming(conn)))
+
+    app.job_queue.run_repeating(reminder_job, interval=15 * 60, first=20)
+    app.job_queue.run_daily(digest_job, time=dt_time(8, 0, tzinfo=TZ))
+
+    async def prep_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if str(update.effective_chat.id) != allowed_chat_id(conn):
+            return
+        company, _, matches = find_by_name(conn, args_text(update))
+        if not company:
+            await reply(update, "Usage: /prep Company")
+        elif len(matches) != 1:
+            await reply(update, f"No single application found for {company}. Try /prep Company | Role.")
+        else:
+            await reply(update, f"Writing the prep guide for {matches[0]['company']}...")
+            await send_prep(context.bot, matches[0]["id"])
+
+    async def research_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if str(update.effective_chat.id) != allowed_chat_id(conn):
+            return
+        company, _, matches = find_by_name(conn, args_text(update))
+        if not company:
+            await reply(update, "Usage: /research Company")
+            return
+        name, role = (matches[0]["company"], matches[0]["role"]) if matches else (company, None)
+        if research.cached(conn, name) is None:
+            await reply(update, f"Researching {name}...")
+        try:
+            data = await get_research(name, role)
+        except Exception:
+            log.exception("Research failed for %s", name)
+            await reply(update, f"I couldn't research {name} right now.")
+            return
+        await send(context.bot, research.format_research(name, data))
 
     async def check_now(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if str(update.effective_chat.id) != allowed_chat_id(conn):
@@ -274,6 +367,8 @@ def build_app(conn, tracker=None, adapter=None):
     app.add_handler(CommandHandler("update", owner_only(lambda u, c: update_status(conn, args_text(u)), sync=True)))
     app.add_handler(CommandHandler("help", owner_only(lambda u, c: HELP)))
     app.add_handler(CommandHandler("check", check_now))
+    app.add_handler(CommandHandler("prep", prep_command))
+    app.add_handler(CommandHandler("research", research_command))
 
     # ----- Flow A: screenshot import -----
     def start_import(update, context):

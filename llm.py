@@ -54,18 +54,58 @@ def ask_claude_vision(images, prompt, *, task, system=None, model=None, schema=N
     return _live(content, system, model, schema, max_tokens)
 
 
+def ask_claude_research(prompt, *, task, system=None, model=None, max_searches=5, max_tokens=8000):
+    """Prompt with the server-side web search tool. Returns (text, sources), where sources is a
+    list of {"title", "url"} the answer cited (or, failing that, the search results)."""
+    if config.LLM_MODE == "mock":
+        return _mock_research(task, prompt)
+    _ensure_client()
+    tools = [{"type": "web_search_20260209", "name": "web_search", "max_uses": max_searches}]
+    messages = [{"role": "user", "content": prompt}]
+    kwargs = {"model": model or config.MODEL_SMART, "max_tokens": max_tokens, "tools": tools}
+    if system:
+        kwargs["system"] = system
+    blocks = []
+    for _ in range(5):  # pause_turn: the server's search loop hit its limit; resend to resume
+        response = _client.messages.create(messages=messages, **kwargs)
+        blocks += response.content
+        if response.stop_reason != "pause_turn":
+            break
+        messages = [messages[0], {"role": "assistant", "content": response.content}]
+    if response.stop_reason == "refusal":
+        raise LLMError(f"Claude declined the request ({response.stop_details})")
+    text = "".join(b.text for b in blocks if b.type == "text")
+    return text, _sources(blocks)
+
+
+def _sources(blocks):
+    cited, searched = {}, {}
+    for b in blocks:
+        if b.type == "text":
+            for c in getattr(b, "citations", None) or []:
+                if getattr(c, "url", None):
+                    cited.setdefault(c.url, getattr(c, "title", None) or c.url)
+        elif b.type == "web_search_tool_result" and isinstance(b.content, list):
+            for r in b.content:
+                searched.setdefault(r.url, r.title or r.url)
+    chosen = cited or searched
+    return [{"title": title, "url": url} for url, title in chosen.items()]
+
+
 # ---------- live ----------
 
 _client = None
 
 
-def _live(content, system, model, schema, max_tokens):
+def _ensure_client():
     global _client
-    import anthropic
-
     if _client is None:
+        import anthropic
         _client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
 
+
+def _live(content, system, model, schema, max_tokens):
+    _ensure_client()
     kwargs = {
         "model": model or config.MODEL_FAST,
         "max_tokens": max_tokens,
@@ -107,6 +147,22 @@ def mock_classify_category(text):
     return "not_relevant"
 
 
+def _field(prompt, name):
+    match = re.search(rf"^{name}: (.+)$", prompt, re.MULTILINE)
+    return match.group(1).strip() if match else "the company"
+
+
+def _mock_research(task, prompt):
+    if task != "research_company":
+        raise LLMError(f"No mock research for task {task!r}")
+    company = _field(prompt, "Company")
+    slug = re.sub(r"[^a-z0-9]+", "-", company.lower()).strip("-")
+    text = (FIXTURES_DIR / "llm" / "research_mock.md").read_text().format(company=company)
+    sources = [{"title": f"{company} - About", "url": f"https://{slug}.example/about"},
+               {"title": f"{company} engineering blog", "url": f"https://{slug}.example/blog"}]
+    return text, sources
+
+
 def _canned_classifications():
     """{category: (canned response, received datetime of the fixture it came from)}"""
     canned = {}
@@ -144,4 +200,7 @@ def _mock(task, prompt):
         return json.dumps(response)
     if task == "parse_screenshot":
         return (FIXTURES_DIR / "screenshots" / "handshake_mock.json").read_text()
+    if task == "write_prep":
+        company, role = _field(prompt, "Company"), _field(prompt, "Role")
+        return (FIXTURES_DIR / "llm" / "prep_mock.md").read_text().format(company=company, role=role)
     raise LLMError(f"No mock response for task {task!r}; add one in llm._mock")
