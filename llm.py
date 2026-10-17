@@ -29,6 +29,10 @@ def ask_claude(prompt, *, task, system=None, model=None, schema=None, max_tokens
 def ask_claude_json(prompt, *, task, schema, system=None, model=None, max_tokens=4096):
     """Like ask_claude, but the reply is forced to match `schema` and returned parsed."""
     text = ask_claude(prompt, task=task, system=system, model=model, schema=schema, max_tokens=max_tokens)
+    return parse_json(text, task)
+
+
+def parse_json(text, task):
     try:
         return json.loads(text)
     except json.JSONDecodeError as e:
@@ -113,4 +117,6 @@ def _mock(task, prompt):
     if task == "classify_email":
         category = mock_classify_category(prompt)
         return json.dumps(_canned_classifications()[category])
+    if task == "parse_screenshot":
+        return (FIXTURES_DIR / "screenshots" / "handshake_mock.json").read_text()
     raise LLMError(f"No mock response for task {task!r}; add one in llm._mock")

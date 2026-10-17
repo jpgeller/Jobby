@@ -2,6 +2,7 @@
 
 Each command handler is a thin wrapper around a plain function that returns the reply text,
 so the logic can be tested without Telegram."""
+import asyncio
 import logging
 from collections import Counter
 from datetime import date, datetime, timedelta
@@ -13,6 +14,7 @@ from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandl
 import config
 import db
 import dedup
+import importer
 
 log = logging.getLogger(__name__)
 TZ = ZoneInfo(config.TIMEZONE)
@@ -23,7 +25,8 @@ HELP = """Commands:
 /status - applications by status and open next steps
 /upcoming - events in the next 7 days
 /add Company | Role - add an application
-/update Company status - change a status, e.g. /update Northwind rejected"""
+/update Company status - change a status, e.g. /update Northwind rejected
+/import - add applications from Handshake screenshots"""
 
 
 # ---------- who may talk to the bot ----------
@@ -166,7 +169,53 @@ def build_app(conn):
     app.add_handler(CommandHandler("add", owner_only(lambda u, c: add_application(conn, args_text(u)))))
     app.add_handler(CommandHandler("update", owner_only(lambda u, c: update_status(conn, args_text(u)))))
     app.add_handler(CommandHandler("help", owner_only(lambda u, c: HELP)))
-    # Free-text Q&A arrives in milestone 13.
+
+    # ----- Flow A: screenshot import -----
+    def start_import(update, context):
+        context.chat_data["import"] = importer.ImportSession()
+        return ("Send screenshots of your Handshake Applications page (one or more). "
+                "Tip: send them as files, not photos, so Telegram doesn't blur the text.")
+
+    async def on_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if str(update.effective_chat.id) != allowed_chat_id(conn):
+            return
+        session = context.chat_data.get("import")
+        if session is None:
+            await reply(update, "To import applications from a screenshot, send /import first.")
+            return
+        msg = update.effective_message
+        if msg.photo:
+            file, media_type = await msg.photo[-1].get_file(), "image/jpeg"
+        else:
+            file, media_type = await msg.document.get_file(), msg.document.mime_type
+        data = bytes(await file.download_as_bytearray())
+        await reply(update, "Reading the screenshot...")
+        try:
+            found = await asyncio.to_thread(importer.parse_screenshot, data, media_type)
+        except Exception:
+            log.exception("Screenshot parsing failed")
+            await reply(update, "I couldn't read that screenshot. Try again, or send it as a file.")
+            return
+        session.add(found)
+        await reply(update, session.preview(conn))
+
+    async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        session = context.chat_data.get("import")
+        if session is None:
+            await reply(update, HELP)  # free-text Q&A arrives in milestone 13
+            return
+        text, done = importer.handle_reply(conn, session, update.effective_message.text)
+        if done:
+            context.chat_data.pop("import", None)
+        await reply(update, text)
+
+    async def owner_gate(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if str(update.effective_chat.id) == allowed_chat_id(conn):
+            await on_text(update, context)
+
+    app.add_handler(CommandHandler("import", owner_only(start_import)))
+    app.add_handler(MessageHandler(filters.PHOTO | filters.Document.IMAGE, on_image))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, owner_gate))
     app.add_handler(MessageHandler(filters.ALL, owner_only(lambda u, c: HELP)))
     return app
 

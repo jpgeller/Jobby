@@ -1,0 +1,11 @@
+{
+  "applications": [
+    {"company": "Northwind Robotics", "role": "Software Engineering Intern, Summer 2027", "applied_date": "2026-10-03", "status": "interview"},
+    {"company": "Pixelworks", "role": "Frontend Engineering Intern", "applied_date": "2026-10-01", "status": "applied"},
+    {"company": "Greenfield Energy", "role": "Data Analyst Intern", "applied_date": "2026-09-28", "status": "applied"},
+    {"company": "Atlas Maps", "role": "Software Intern, Summer 2027", "applied_date": "2026-09-25", "status": "assessment"},
+    {"company": "Brightline Data", "role": "Machine Learning Intern", "applied_date": "2026-09-22", "status": "applied"},
+    {"company": "Corvid Security", "role": "Security Engineering Intern", "applied_date": "2026-09-20", "status": "rejected"},
+    {"company": "Tidepool Bio", "role": "Computational Biology Intern", "applied_date": "2026-09-18", "status": "applied"}
+  ]
+}
