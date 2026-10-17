@@ -1,4 +1,4 @@
-"""Jobby entry point. Later milestones add the scheduler and the Telegram bot here."""
+"""Jobby entry point: starts the Telegram bot, which also runs the inbox and tracker jobs."""
 import argparse
 import json
 
@@ -13,6 +13,27 @@ FIXTURE_EMAILS = config.ROOT / "fixtures" / "emails"
 
 def load_fixture_emails():
     return [json.loads(p.read_text()) for p in sorted(FIXTURE_EMAILS.glob("*.json"))]
+
+
+# The demo starts here: Northwind at the assessment stage, so a test interview email visibly moves it.
+DEMO_SEED = ["fixture-01", "fixture-02", "fixture-05", "fixture-06"]
+DATA_TABLES = ["events", "outreach", "actions_log", "processed_emails", "company_research", "applications"]
+
+
+def demo_reset(conn):
+    """Wipe applications and events (keeping settings like the chat and sheet IDs), seed the demo
+    starting point, and clear the tracker sheet so it mirrors the fresh database."""
+    for table in DATA_TABLES:
+        conn.execute(f"DELETE FROM {table}")
+    conn.execute("DELETE FROM sqlite_sequence")
+    conn.commit()
+    emails = {e["id"]: e for e in load_fixture_emails()}
+    for email_id in DEMO_SEED:
+        pipeline.process_email(conn, emails[email_id])
+    tracker = trackers.get_tracker(conn)
+    tracker.clear()
+    trackers.sync_tracker(conn, tracker)
+    print(f"Demo reset: {len(db.list_applications(conn))} applications seeded, tracker cleared and resynced.")
 
 
 def replay_fixtures(conn):
@@ -37,13 +58,19 @@ def replay_fixtures(conn):
 def main():
     parser = argparse.ArgumentParser(description="Jobby: internship application agent")
     parser.add_argument("--replay-fixtures", action="store_true",
-                        help="feed fixtures/emails through the pipeline without Gmail (milestone 2)")
+                        help="feed fixtures/emails through the pipeline without Gmail")
+    parser.add_argument("--demo-reset", action="store_true",
+                        help="wipe applications and seed the demo starting point (keeps settings)")
     args = parser.parse_args()
 
     conn = db.init_db()
     print(f"Jobby started. LLM mode: {config.LLM_MODE}. Actions: {config.ACTIONS_BACKEND}. "
           f"Tracker: {config.TRACKER_BACKEND}.")
     print(f"Database ready at {config.DB_PATH.name}: {', '.join(db.table_names(conn))}")
+
+    if args.demo_reset:
+        demo_reset(conn)
+        return
 
     if args.replay_fixtures:
         replay_fixtures(conn)

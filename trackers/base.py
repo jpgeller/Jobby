@@ -13,6 +13,10 @@ class TrackerAdapter:
     def list_rows(self) -> list[dict]:
         raise NotImplementedError
 
+    def clear(self) -> None:
+        """Remove every application row (used by --demo-reset)."""
+        raise NotImplementedError
+
     def sync(self, apps: list[dict]) -> dict[int, str]:
         """Mirror many applications at once. Returns {application id: tracker_row_id}.
         Backends may override this with a batched version."""

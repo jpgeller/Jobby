@@ -14,7 +14,9 @@ from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandl
 import config
 import db
 import dedup
+import gmail_watcher
 import importer
+import pipeline
 import trackers
 
 log = logging.getLogger(__name__)
@@ -27,7 +29,8 @@ HELP = """Commands:
 /upcoming - events in the next 7 days
 /add Company | Role - add an application
 /update Company status - change a status, e.g. /update Northwind rejected
-/import - add applications from Handshake screenshots"""
+/import - add applications from Handshake screenshots
+/check - check the inbox for new application emails now"""
 
 
 # ---------- who may talk to the bot ----------
@@ -137,6 +140,35 @@ def update_status(conn, args_text):
     return f"{app['company']} - {app['role']}: {app['status']} -> {status}."
 
 
+def format_email_outcome(outcome, email):
+    """The Telegram message for one processed email, or None when there is nothing to say."""
+    action = outcome["action"]
+    c = outcome.get("classification") or {}
+    if action == "needs_review":
+        return (f"I couldn't tell what this email is about:\n\"{email['subject']}\"\n"
+                "If it matters, use /add or /update.")
+    if action == "recruiter_lead":
+        return f"A recruiter at {c['company']} reached out about {c['role']}: {c['summary']}"
+    if action not in {"created", "updated"}:
+        return None
+    event = c.get("event") or {}
+    when = f" - {_fmt_time(event['start'])}" if event.get("start") else ""
+    old, new = outcome["old_status"], outcome["new_status"]
+    if action == "created":
+        text = f"New application tracked: {c['company']} - {c['role']} ({new}){when}."
+    elif old != new:
+        text = f"{c['company']} moved to {new.capitalize()}{when}."
+    elif c["category"] == "interview_reschedule":
+        text = f"{c['company']} interview rescheduled{when}."
+    else:
+        text = f"{c['company']} updated{when}."
+    if event.get("needs_scheduling"):
+        text += " You still need to book a slot."
+    if c.get("next_step"):
+        text += f"\nNext: {c['next_step']}"
+    return text
+
+
 def _fmt_time(value):
     dt = datetime.fromisoformat(value) if isinstance(value, str) else value
     return dt.astimezone(TZ).strftime("%a %b %-d, %-I:%M %p")
@@ -161,6 +193,51 @@ def build_app(conn, tracker=None):
 
     if tracker is not None:
         app.job_queue.run_repeating(sync_tracker, interval=config.POLL_MINUTES * 60, first=1)
+
+    inbox_lock = asyncio.Lock()
+
+    async def check_inbox(context):
+        """Flow B: fetch new emails, process them oldest first, notify, sync the tracker.
+        Returns how many emails were processed."""
+        if inbox_lock.locked():
+            return 0
+        async with inbox_lock:
+            try:
+                gmail = await asyncio.to_thread(gmail_watcher.gmail_service)
+                ids = await asyncio.to_thread(gmail_watcher.list_message_ids, gmail, gmail_watcher.current_query())
+                new_ids = [i for i in ids if not db.is_email_processed(conn, i)]
+                emails = [await asyncio.to_thread(gmail_watcher.get_email, gmail, i) for i in new_ids]
+            except Exception:
+                log.exception("Inbox check failed; will retry next cycle")
+                return 0
+            if config.LLM_MODE == "mock":  # the query already narrows to test emails; double-check
+                emails = [e for e in emails if gmail_watcher.is_test_email(e)]
+            count = 0
+            for email in sorted(emails, key=lambda e: e["received"]):
+                try:
+                    outcome = pipeline.process_email(conn, email)
+                except Exception:
+                    log.exception("Could not process email %s", email["id"])
+                    continue
+                count += 1
+                text = format_email_outcome(outcome, email)
+                chat = allowed_chat_id(conn)
+                if text and chat:
+                    await context.bot.send_message(chat_id=chat, text=text, disable_web_page_preview=True)
+                await asyncio.sleep(0)  # let other handlers run between emails
+        if count:
+            await sync_tracker()
+        return count
+
+    app.job_queue.run_repeating(check_inbox, interval=config.POLL_MINUTES * 60, first=10)
+
+    async def check_now(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if str(update.effective_chat.id) != allowed_chat_id(conn):
+            return
+        await reply(update, "Checking your inbox...")
+        count = await check_inbox(context)
+        if not count:
+            await reply(update, "No new application emails.")
 
     async def reply(update, text):
         if text:
@@ -191,6 +268,7 @@ def build_app(conn, tracker=None):
     app.add_handler(CommandHandler("add", owner_only(lambda u, c: add_application(conn, args_text(u)), sync=True)))
     app.add_handler(CommandHandler("update", owner_only(lambda u, c: update_status(conn, args_text(u)), sync=True)))
     app.add_handler(CommandHandler("help", owner_only(lambda u, c: HELP)))
+    app.add_handler(CommandHandler("check", check_now))
 
     # ----- Flow A: screenshot import -----
     def start_import(update, context):

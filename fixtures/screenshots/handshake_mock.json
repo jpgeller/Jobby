@@ -1,6 +1,6 @@
 {
   "applications": [
-    {"company": "Northwind Robotics", "role": "Software Engineering Intern, Summer 2027", "applied_date": "2026-10-03", "status": "interview"},
+    {"company": "Northwind Robotics", "role": "Software Engineering Intern, Summer 2027", "applied_date": "2026-10-03", "status": "assessment"},
     {"company": "Pixelworks", "role": "Frontend Engineering Intern", "applied_date": "2026-10-01", "status": "applied"},
     {"company": "Greenfield Energy", "role": "Data Analyst Intern", "applied_date": "2026-09-28", "status": "applied"},
     {"company": "Atlas Maps", "role": "Software Intern, Summer 2027", "applied_date": "2026-09-25", "status": "assessment"},

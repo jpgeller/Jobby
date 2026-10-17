@@ -98,6 +98,10 @@ class SheetsTracker(TrackerAdapter):
                                                   "startIndex": i, "endIndex": i + 1}}}]}).execute()
                 return
 
+    def clear(self):
+        self._ensure_tab()
+        self.api.values().clear(spreadsheetId=self.spreadsheet_id, range=f"{TAB}!A2:{LAST_COL}").execute()
+
     # ----- Sheets API calls (overridden in tests) -----
 
     def _read(self):

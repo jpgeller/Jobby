@@ -5,8 +5,11 @@ input, so every other module behaves exactly as it would live. Each call names a
 mock mode knows which kind of canned answer to give.
 """
 import base64
+import copy
 import json
+import math
 import re
+from datetime import datetime, timedelta
 
 import config
 
@@ -106,17 +109,38 @@ def mock_classify_category(text):
 
 
 def _canned_classifications():
+    """{category: (canned response, received datetime of the fixture it came from)}"""
     canned = {}
     for path in sorted((FIXTURES_DIR / "emails").glob("*.json")):
-        response = json.loads(path.read_text())["mock_response"]
-        canned.setdefault(response["category"], response)
+        fixture = json.loads(path.read_text())
+        response = fixture["mock_response"]
+        canned.setdefault(response["category"], (response, datetime.fromisoformat(fixture["received"])))
     return canned
+
+
+def _shift_dates(response, weeks):
+    """Move event and deadline datetimes forward by whole weeks (weekdays stay the same)."""
+    if weeks <= 0:
+        return response
+    shift = lambda v: (datetime.fromisoformat(v) + timedelta(weeks=weeks)).isoformat() if v else v
+    response = copy.deepcopy(response)
+    response["deadline"] = shift(response["deadline"])
+    if response["event"]:
+        response["event"]["start"] = shift(response["event"]["start"])
+        response["event"]["end"] = shift(response["event"]["end"])
+    return response
 
 
 def _mock(task, prompt):
     if task == "classify_email":
-        category = mock_classify_category(prompt)
-        return json.dumps(_canned_classifications()[category])
+        response, fixture_received = _canned_classifications()[mock_classify_category(prompt)]
+        # A test email sent today gets the fixture's dates moved to today's week, so a
+        # demo interview is always in the future. Replaying the fixtures themselves shifts nothing.
+        match = re.search(r"^Received: (\S+)", prompt, re.MULTILINE)
+        if match:
+            days = (datetime.fromisoformat(match.group(1)) - fixture_received).days
+            response = _shift_dates(response, math.ceil(days / 7))
+        return json.dumps(response)
     if task == "parse_screenshot":
         return (FIXTURES_DIR / "screenshots" / "handshake_mock.json").read_text()
     raise LLMError(f"No mock response for task {task!r}; add one in llm._mock")

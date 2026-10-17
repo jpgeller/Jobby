@@ -36,7 +36,7 @@ def test_preview_marks_already_tracked(conn):
     session.add(screenshot())
     text = session.preview(conn)
     assert text.startswith("Found 7:")
-    assert "1. Northwind Robotics - Software Engineering Intern, Summer 2027 (interview, 2026-10-03) (already tracked" in text
+    assert "1. Northwind Robotics - Software Engineering Intern, Summer 2027 (assessment, 2026-10-03) (already tracked" in text
 
 
 def test_remove_then_ok_imports_the_rest(conn):
