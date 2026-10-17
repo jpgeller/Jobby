@@ -1,0 +1,17 @@
+{
+  "id": "fixture-08",
+  "from": "Handshake <notifications@joinhandshake.com>",
+  "subject": "Top jobs picked for you this week",
+  "received": "2026-10-13T07:00:00-07:00",
+  "body": "<h2>Jobs we think you'll like</h2><ul><li>Frontend Intern — Pixelworks</li><li>Data Analyst Intern — Greenfield Energy</li><li>Software Intern — Atlas Maps</li></ul><p>Update your notification settings anytime.</p>",
+  "mock_response": {
+    "category": "not_relevant",
+    "confidence": 0.94,
+    "company": null,
+    "role": null,
+    "event": null,
+    "deadline": null,
+    "next_step": null,
+    "summary": "Handshake weekly job recommendations"
+  }
+}

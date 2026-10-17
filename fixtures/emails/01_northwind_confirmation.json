@@ -1,0 +1,17 @@
+{
+  "id": "fixture-01",
+  "from": "Handshake <notifications@joinhandshake.com>",
+  "subject": "Your application to Northwind Robotics was submitted",
+  "received": "2026-10-03T09:12:00-07:00",
+  "body": "<p>Hi João,</p><p>Thank you for applying! Your application for <b>Software Engineering Intern, Summer 2027</b> at Northwind Robotics was submitted on Handshake.</p><p>The employer will review your materials and reach out if they would like to move forward.</p><p>— The Handshake Team</p>",
+  "mock_response": {
+    "category": "application_confirmation",
+    "confidence": 0.97,
+    "company": "Northwind Robotics",
+    "role": "Software Engineering Intern, Summer 2027",
+    "event": null,
+    "deadline": null,
+    "next_step": "Wait for employer review",
+    "summary": "Application submitted via Handshake"
+  }
+}

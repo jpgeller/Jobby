@@ -1,0 +1,23 @@
+{
+  "id": "fixture-03",
+  "from": "Priya Shah <priya.shah@northwind-robotics.example>",
+  "subject": "Interview invitation - Software Engineering Intern",
+  "received": "2026-10-15T10:05:00-07:00",
+  "body": "Hi João,\n\nGreat work on the assessment! We'd like to invite you to a 45-minute technical interview with our engineering team for the Software Engineering Intern, Summer 2027 position.\n\nWhen: Friday, October 24, 3:00-3:45 PM PT\nWhere: https://zoom.example/j/8812345678\n\nYou'll pair with an engineer on a practical coding problem. Let me know if this time doesn't work.\n\nBest,\nPriya Shah\nUniversity Recruiter, Northwind Robotics",
+  "mock_response": {
+    "category": "interview_invite",
+    "confidence": 0.96,
+    "company": "Northwind Robotics",
+    "role": "Software Engineering Intern, Summer 2027",
+    "event": {
+      "type": "interview",
+      "start": "2026-10-24T15:00:00-07:00",
+      "end": "2026-10-24T15:45:00-07:00",
+      "location_or_link": "https://zoom.example/j/8812345678",
+      "needs_scheduling": false
+    },
+    "deadline": null,
+    "next_step": "Technical interview with engineering team",
+    "summary": "45-min technical interview, Fri Oct 24 3pm PT"
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "id": "fixture-06",
+  "from": "Marcus Lee <marcus.lee@quantalabs.example>",
+  "subject": "Your offer from Quanta Labs!",
+  "received": "2026-10-14T12:20:00-07:00",
+  "body": "Hi João,\n\nCongratulations! We are pleased to offer you the Machine Learning Research Intern position for Summer 2027. Your offer letter is attached. Please sign and return it by Friday, October 31.\n\nWe're excited to have you on the team!\n\nMarcus Lee\nRecruiting, Quanta Labs",
+  "mock_response": {
+    "category": "offer",
+    "confidence": 0.99,
+    "company": "Quanta Labs",
+    "role": "Machine Learning Research Intern, Summer 2027",
+    "event": null,
+    "deadline": "2026-10-31T23:59:00-07:00",
+    "next_step": "Sign and return offer letter",
+    "summary": "Offer received, respond by Fri Oct 31"
+  }
+}

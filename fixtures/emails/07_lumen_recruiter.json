@@ -1,0 +1,17 @@
+{
+  "id": "fixture-07",
+  "from": "Dana Ortiz <dana.ortiz@lumenhealth.example>",
+  "subject": "Product Engineering Intern at Lumen Health",
+  "received": "2026-10-12T11:45:00-07:00",
+  "body": "Hi João,\n\nI came across your profile on Handshake and was impressed by your projects. I'm a recruiter at Lumen Health and we're hiring Product Engineering Interns for Summer 2027. Would you be open to a quick 15-minute chat next week?\n\nBest,\nDana Ortiz\nTechnical Recruiter, Lumen Health",
+  "mock_response": {
+    "category": "recruiter_outreach",
+    "confidence": 0.9,
+    "company": "Lumen Health",
+    "role": "Product Engineering Intern, Summer 2027",
+    "event": null,
+    "deadline": null,
+    "next_step": "Reply to recruiter Dana Ortiz",
+    "summary": "Recruiter asked for a 15-min chat"
+  }
+}

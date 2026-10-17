@@ -1,0 +1,17 @@
+{
+  "id": "fixture-05",
+  "from": "Helio Payments Careers <no-reply@helio-payments.example>",
+  "subject": "Update on your Helio Payments application",
+  "received": "2026-10-10T08:00:00-07:00",
+  "body": "Dear João,\n\nThank you for your interest in the Data Science Intern position at Helio Payments. After careful review, we have decided not to move forward with your application at this time. Unfortunately, we received many strong applications this cycle.\n\nWe wish you the best in your search.\n\nHelio Payments Talent Team",
+  "mock_response": {
+    "category": "rejection",
+    "confidence": 0.98,
+    "company": "Helio Payments",
+    "role": "Data Science Intern",
+    "event": null,
+    "deadline": null,
+    "next_step": null,
+    "summary": "Rejected after application review"
+  }
+}
