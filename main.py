@@ -1,5 +1,6 @@
 """Jobby entry point: starts the Telegram bot, which also runs the inbox and tracker jobs."""
 import argparse
+import logging
 import json
 
 import actions
@@ -66,6 +67,10 @@ def replay_fixtures(conn):
 
 
 def main():
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    # HTTP libraries log full request URLs at INFO, and Telegram's include the bot token.
+    for noisy in ("httpx", "httpx2", "telegram", "apscheduler", "mcp", "googleapiclient"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
     parser = argparse.ArgumentParser(description="Jobby: internship application agent")
     parser.add_argument("--replay-fixtures", action="store_true",
                         help="feed fixtures/emails through the pipeline without Gmail")

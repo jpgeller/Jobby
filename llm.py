@@ -210,6 +210,14 @@ def _mock(task, prompt):
             change = prompt.rsplit("instructions from the student:", 1)[-1].strip()
             body += f"\n\n[MOCK REVISION - asked for: {change}]"
         return json.dumps({"subject": f"{role} application - João", "body": body})
+    if task == "answer_question":
+        # Mock can't reason, so it answers from the section that matches the question best.
+        question = prompt.rsplit("QUESTION:", 1)[-1].lower()
+        section = "EVENTS" if re.search(r"week|upcoming|next|when|schedule|interview|due|deadline|calendar",
+                                        question) else "APPLICATIONS"
+        body = prompt.split(f"{section}", 1)[-1].split("\n\n", 1)[0]
+        lines = [l for l in body.splitlines() if l.startswith("- ") and "(past)" not in l]
+        return "[MOCK ANSWER - live mode answers in your own words]\n" + ("\n".join(lines) or "Nothing found.")
     if task == "call_points":
         company = _field(prompt, "Company")
         return json.dumps({"points": [f"Lead with why {company}, and connect it to Jobby",

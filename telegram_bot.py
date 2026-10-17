@@ -9,7 +9,7 @@ from datetime import date, datetime, timedelta
 from datetime import time as dt_time
 from zoneinfo import ZoneInfo
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters
 
 import actions
@@ -24,6 +24,7 @@ import importer
 import outreach
 import pipeline
 import prep
+import qa
 import reminders
 import research
 import trackers
@@ -43,7 +44,10 @@ HELP = """Commands:
 /prep Company - interview prep guide
 /research Company - what Jobby knows about a company, with sources
 /outreach Company [email] - draft an outreach email now (you still approve it)
-/call Company - have Fo call you now with a quick prep summary for the next interview"""
+/call Company - have Fo call you now with a quick prep summary for the next interview
+
+Or just ask, e.g. "what do I have this week?"
+"""
 
 
 # ---------- who may talk to the bot ----------
@@ -198,8 +202,26 @@ def _fmt_time(value):
 
 # ---------- Telegram wiring ----------
 
+COMMANDS = [
+    ("status", "Applications by status and open next steps"),
+    ("upcoming", "Events in the next 7 days"),
+    ("check", "Check the inbox now"),
+    ("import", "Import applications from screenshots"),
+    ("add", "Add an application: Company | Role"),
+    ("update", "Change a status: Company status"),
+    ("prep", "Interview prep guide: Company"),
+    ("research", "What Jobby knows about a company"),
+    ("outreach", "Draft an outreach email: Company [email]"),
+    ("call", "Fo calls you with a prep summary: Company"),
+    ("help", "All commands"),
+]
+
+
 def build_app(conn, tracker=None, adapter=None):
-    app = Application.builder().token(config.TELEGRAM_BOT_TOKEN).build()
+    async def set_menu(application):
+        await application.bot.set_my_commands([BotCommand(name, desc) for name, desc in COMMANDS])
+
+    app = Application.builder().token(config.TELEGRAM_BOT_TOKEN).post_init(set_menu).build()
     sync_lock = asyncio.Lock()  # a timer sync and a command sync must not both append rows
 
     async def sync_tracker(context=None):
@@ -509,6 +531,14 @@ def build_app(conn, tracker=None, adapter=None):
                 pass  # old message already edited or gone
         await show_outreach(context.bot, oid)
 
+    async def answer_question(update, question):
+        try:
+            text = await asyncio.to_thread(qa.answer, qa.build_context(conn), question)
+        except Exception:
+            log.exception("Question failed")
+            text = "I couldn't answer that right now. Try /status or /upcoming."
+        await send(update.get_bot(), text)
+
     async def check_now(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if str(update.effective_chat.id) != allowed_chat_id(conn):
             return
@@ -589,7 +619,7 @@ def build_app(conn, tracker=None, adapter=None):
             return
         session = context.chat_data.get("import")
         if session is None:
-            await reply(update, HELP)  # free-text Q&A arrives in milestone 13
+            await answer_question(update, update.effective_message.text)
             return
         text, done = importer.handle_reply(conn, session, update.effective_message.text)
         if done:
