@@ -34,6 +34,7 @@ CREATE TABLE IF NOT EXISTS events (
     "end"             TEXT,
     location_or_link  TEXT,
     calendar_event_id TEXT,
+    email_received_at TEXT,  -- received time of the email that last set this event
     reminded_24h      INTEGER NOT NULL DEFAULT 0,
     reminded_2h       INTEGER NOT NULL DEFAULT 0,
     called            INTEGER NOT NULL DEFAULT 0,
@@ -99,3 +100,57 @@ def init_db(path=None):
 def table_names(conn):
     rows = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
     return sorted(r["name"] for r in rows)
+
+
+# ---------- applications ----------
+
+def get_application(conn, app_id):
+    return conn.execute("SELECT * FROM applications WHERE id = ?", (app_id,)).fetchone()
+
+
+def list_applications(conn):
+    return conn.execute("SELECT * FROM applications ORDER BY id").fetchall()
+
+
+def insert_application(conn, **fields):
+    cols = ", ".join(fields)
+    marks = ", ".join("?" for _ in fields)
+    cur = conn.execute(f"INSERT INTO applications ({cols}) VALUES ({marks})", tuple(fields.values()))
+    return cur.lastrowid
+
+
+def update_application(conn, app_id, **fields):
+    if not fields:
+        return
+    sets = ", ".join(f"{k} = ?" for k in fields)
+    conn.execute(f"UPDATE applications SET {sets}, updated_at = datetime('now') WHERE id = ?",
+                 (*fields.values(), app_id))
+
+
+# ---------- events ----------
+
+def insert_event(conn, **fields):
+    cols = ", ".join(f'"{k}"' for k in fields)
+    marks = ", ".join("?" for _ in fields)
+    return conn.execute(f"INSERT INTO events ({cols}) VALUES ({marks})", tuple(fields.values())).lastrowid
+
+
+def update_event(conn, event_id, **fields):
+    sets = ", ".join(f'"{k}" = ?' for k in fields)
+    conn.execute(f"UPDATE events SET {sets} WHERE id = ?", (*fields.values(), event_id))
+
+
+def latest_event(conn, app_id, event_type):
+    return conn.execute("SELECT * FROM events WHERE application_id = ? AND type = ? ORDER BY id DESC LIMIT 1",
+                        (app_id, event_type)).fetchone()
+
+
+# ---------- processed emails ----------
+
+def is_email_processed(conn, message_id):
+    return conn.execute("SELECT 1 FROM processed_emails WHERE gmail_message_id = ?", (message_id,)).fetchone() is not None
+
+
+def mark_email_processed(conn, message_id, classification, app_id=None):
+    conn.execute("INSERT INTO processed_emails (gmail_message_id, classification, application_id) VALUES (?, ?, ?)",
+                 (message_id, classification, app_id))
