@@ -10,9 +10,11 @@ import asyncio
 import json
 import sys
 import threading
+import time
 import webbrowser
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, urlencode, urlparse
+from urllib.request import Request, urlopen
 
 from mcp import ClientSession
 from mcp.client.auth import OAuthClientProvider, TokenStorage
@@ -145,8 +147,33 @@ async def ask_fo_async(message, new_conversation=True, interactive=False):
                 return reply
 
 
+TOKEN_ENDPOINT = "https://mcp.api.wajo.ai/oauth/token"
+REFRESH_MARGIN_SECONDS = 600
+
+
+def refresh_if_needed(force=False):
+    """Renew the access token (it lasts an hour) with the saved refresh token, before it expires.
+    The MCP library would otherwise fall back to a browser login, which a running bot can't do."""
+    data = json.loads(TOKEN_FILE.read_text())
+    tokens, client = data["tokens"], data["client_info"]
+    age = time.time() - TOKEN_FILE.stat().st_mtime
+    if not force and age < tokens.get("expires_in", 3600) - REFRESH_MARGIN_SECONDS:
+        return False
+    body = urlencode({"grant_type": "refresh_token", "refresh_token": tokens["refresh_token"],
+                      "client_id": client["client_id"], "resource": config.WAJO_MCP_URL}).encode()
+    request = Request(TOKEN_ENDPOINT, data=body, headers={"Content-Type": "application/x-www-form-urlencoded",
+                                                         "Accept": "application/json"})
+    with urlopen(request, timeout=30) as resp:
+        new = json.loads(resp.read())
+    new.setdefault("refresh_token", tokens["refresh_token"])  # some servers rotate it, some don't
+    data["tokens"] = new
+    TOKEN_FILE.write_text(json.dumps(data, indent=2))
+    return True
+
+
 def ask_fo(message, new_conversation=True):
     """Blocking version for worker threads. Never opens a browser."""
+    refresh_if_needed()
     return asyncio.run(ask_fo_async(message, new_conversation, interactive=False))
 
 
