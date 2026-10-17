@@ -15,6 +15,7 @@ import config
 import db
 import dedup
 import importer
+import trackers
 
 log = logging.getLogger(__name__)
 TZ = ZoneInfo(config.TIMEZONE)
@@ -60,6 +61,9 @@ def format_status(conn):
         for a in open_steps:
             due = f" (due {_fmt_time(a['next_deadline'])})" if a["next_deadline"] else ""
             lines.append(f"• {a['company']} - {a['next_step']}{due}")
+    url = trackers.tracker_url(conn)
+    if url:
+        lines.append(f"\nTracker: {url}")
     return "\n".join(lines)
 
 
@@ -140,19 +144,37 @@ def _fmt_time(value):
 
 # ---------- Telegram wiring ----------
 
-def build_app(conn):
+def build_app(conn, tracker=None):
     app = Application.builder().token(config.TELEGRAM_BOT_TOKEN).build()
+    sync_lock = asyncio.Lock()  # a timer sync and a command sync must not both append rows
+
+    async def sync_tracker(context=None):
+        if tracker is None:
+            return
+        async with sync_lock:
+            try:
+                rows = trackers.rows_to_sync(conn)
+                row_ids = await asyncio.to_thread(tracker.sync, rows)
+                trackers.save_row_ids(conn, row_ids)
+            except Exception:
+                log.exception("Tracker sync failed; will retry next cycle")
+
+    if tracker is not None:
+        app.job_queue.run_repeating(sync_tracker, interval=config.POLL_MINUTES * 60, first=1)
 
     async def reply(update, text):
         if text:
             await update.effective_message.reply_text(text, disable_web_page_preview=True)
 
-    def owner_only(fn):
+    def owner_only(fn, sync=False):
+        """Answer only the owner. sync=True mirrors the tracker right after a change."""
         async def handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if str(update.effective_chat.id) != allowed_chat_id(conn):
                 log.info("Ignoring message from chat %s", update.effective_chat.id)
                 return
             await reply(update, fn(update, context))
+            if sync:
+                context.application.create_task(sync_tracker())
         return handler
 
     def args_text(update):
@@ -166,8 +188,8 @@ def build_app(conn):
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("status", owner_only(lambda u, c: format_status(conn))))
     app.add_handler(CommandHandler("upcoming", owner_only(lambda u, c: format_upcoming(conn))))
-    app.add_handler(CommandHandler("add", owner_only(lambda u, c: add_application(conn, args_text(u)))))
-    app.add_handler(CommandHandler("update", owner_only(lambda u, c: update_status(conn, args_text(u)))))
+    app.add_handler(CommandHandler("add", owner_only(lambda u, c: add_application(conn, args_text(u)), sync=True)))
+    app.add_handler(CommandHandler("update", owner_only(lambda u, c: update_status(conn, args_text(u)), sync=True)))
     app.add_handler(CommandHandler("help", owner_only(lambda u, c: HELP)))
 
     # ----- Flow A: screenshot import -----
@@ -208,6 +230,8 @@ def build_app(conn):
         if done:
             context.chat_data.pop("import", None)
         await reply(update, text)
+        if done:
+            context.application.create_task(sync_tracker())
 
     async def owner_gate(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if str(update.effective_chat.id) == allowed_chat_id(conn):
@@ -220,9 +244,9 @@ def build_app(conn):
     return app
 
 
-def run(conn):
+def run(conn, tracker=None):
     if not config.TELEGRAM_BOT_TOKEN:
         print("TELEGRAM_BOT_TOKEN is not set in .env, so the bot is not running.")
         return
     print("Telegram bot running. Press Ctrl+C to stop.")
-    build_app(conn).run_polling()
+    build_app(conn, tracker).run_polling()

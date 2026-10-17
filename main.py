@@ -6,6 +6,7 @@ import config
 import db
 import pipeline
 import telegram_bot
+import trackers
 
 FIXTURE_EMAILS = config.ROOT / "fixtures" / "emails"
 
@@ -48,7 +49,13 @@ def main():
         replay_fixtures(conn)
         return
 
-    telegram_bot.run(conn)
+    tracker = None
+    try:
+        tracker = trackers.get_tracker(conn)
+        print(f"Tracker: {trackers.tracker_url(conn)} ({trackers.sync_tracker(conn, tracker)} rows synced)")
+    except Exception as e:
+        print(f"Tracker unavailable, continuing without it: {e}")
+    telegram_bot.run(conn, tracker)
 
 
 if __name__ == "__main__":

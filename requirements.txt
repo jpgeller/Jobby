@@ -1,6 +1,6 @@
 anthropic
 apscheduler
-python-telegram-bot
+python-telegram-bot[job-queue]
 google-api-python-client
 google-auth-oauthlib
 rapidfuzz
