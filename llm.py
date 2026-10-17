@@ -7,7 +7,6 @@ mock mode knows which kind of canned answer to give.
 import base64
 import copy
 import json
-import math
 import re
 from datetime import datetime, timedelta
 
@@ -118,11 +117,11 @@ def _canned_classifications():
     return canned
 
 
-def _shift_dates(response, weeks):
-    """Move event and deadline datetimes forward by whole weeks (weekdays stay the same)."""
-    if weeks <= 0:
+def _shift_dates(response, days):
+    """Move event and deadline datetimes forward by whole days."""
+    if days <= 0:
         return response
-    shift = lambda v: (datetime.fromisoformat(v) + timedelta(weeks=weeks)).isoformat() if v else v
+    shift = lambda v: (datetime.fromisoformat(v) + timedelta(days=days)).isoformat() if v else v
     response = copy.deepcopy(response)
     response["deadline"] = shift(response["deadline"])
     if response["event"]:
@@ -134,12 +133,14 @@ def _shift_dates(response, weeks):
 def _mock(task, prompt):
     if task == "classify_email":
         response, fixture_received = _canned_classifications()[mock_classify_category(prompt)]
-        # A test email sent today gets the fixture's dates moved to today's week, so a
-        # demo interview is always in the future. Replaying the fixtures themselves shifts nothing.
+        # A test email sent today gets the fixture's dates moved forward so a demo interview is
+        # always in the future. Two days less than the full gap: the fixture interview is 8 days
+        # after its email, and this lands it 6 days out, inside /upcoming's 7-day window.
+        # Replaying the fixtures themselves shifts nothing.
         match = re.search(r"^Received: (\S+)", prompt, re.MULTILINE)
         if match:
             days = (datetime.fromisoformat(match.group(1)) - fixture_received).days
-            response = _shift_dates(response, math.ceil(days / 7))
+            response = _shift_dates(response, days - 2)
         return json.dumps(response)
     if task == "parse_screenshot":
         return (FIXTURES_DIR / "screenshots" / "handshake_mock.json").read_text()

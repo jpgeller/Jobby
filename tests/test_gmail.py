@@ -1,6 +1,6 @@
 import base64
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pytest
 
@@ -60,8 +60,8 @@ def test_mock_test_email_gets_a_future_interview(monkeypatch):
     result = classifier.classify_email(email)
     start = datetime.fromisoformat(result["event"]["start"])
     assert result["category"] == "interview_invite"
-    assert start > datetime.fromisoformat(email["received"])
-    assert start.strftime("%a") == "Fri"  # shifted by whole weeks
+    received = datetime.fromisoformat(email["received"])
+    assert received < start < received + timedelta(days=7)  # shows up in /upcoming
 
 
 def test_notification_text():
