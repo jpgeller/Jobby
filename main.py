@@ -24,10 +24,11 @@ DEMO_SEED = ["fixture-01", "fixture-02", "fixture-05", "fixture-06"]
 DATA_TABLES = ["events", "outreach", "actions_log", "processed_emails", "company_research", "applications"]
 
 
-def demo_reset(conn):
-    """Wipe applications and events (keeping settings like the chat and sheet IDs), seed the demo
-    starting point, and clear the tracker sheet so it mirrors the fresh database."""
-    # Setup, not the demo itself: use Google directly so the reset is fast and predictable.
+def wipe(conn, seed=()):
+    """Delete applications, events, and history (keeping settings like the chat and sheet IDs),
+    remove the calendar events Jobby created, optionally seed fixture emails, and clear the sheet so
+    it mirrors the database. Jobby's own test emails are marked handled so they never count."""
+    # Setup, not an action Jobby takes for you: use Google directly so it is fast and predictable.
     adapter = actions.get_actions(backend="google")
     removed = 0
     for row in conn.execute("SELECT calendar_event_id FROM events WHERE calendar_event_id IS NOT NULL").fetchall():
@@ -38,20 +39,20 @@ def demo_reset(conn):
     conn.execute("DELETE FROM sqlite_sequence")
     conn.commit()
     emails = {e["id"]: e for e in load_fixture_emails()}
-    for email_id in DEMO_SEED:
+    for email_id in seed:
         pipeline.process_email(conn, emails[email_id])
-    # Old [Jobby test] emails count as handled, so the interview invite only "arrives" when you
-    # send a fresh one during the demo, instead of the moment the bot starts.
+    # [Jobby test] / [Jobby outreach test] emails count as handled: in a demo the invite only
+    # "arrives" when you send a fresh one, and in live mode they are never read as real invites.
     gmail = gmail_watcher.gmail_service()
-    old_tests = gmail_watcher.list_message_ids(gmail, f'{gmail_watcher.QUERY} subject:"jobby test"')
-    for message_id in old_tests:
-        db.mark_email_processed(conn, message_id, "demo_reset_skip")
+    tests = gmail_watcher.list_message_ids(gmail, 'subject:"jobby test" OR subject:"jobby outreach test"', limit=500)
+    for message_id in tests:
+        db.mark_email_processed(conn, message_id, "jobby_test_skip")
     conn.commit()
     tracker = trackers.get_tracker(conn)
     tracker.clear()
     trackers.sync_tracker(conn, tracker)
     added = calendar_sync.sync_calendar(conn, adapter)
-    print(f"Demo reset: {len(db.list_applications(conn))} applications seeded, {len(old_tests)} old test emails skipped, "
+    print(f"Wiped. {len(db.list_applications(conn))} applications seeded, {len(tests)} Jobby test emails skipped, "
           f"{removed} old calendar events removed, {added} added.")
 
 
@@ -83,7 +84,9 @@ def main():
     parser.add_argument("--replay-fixtures", action="store_true",
                         help="feed fixtures/emails through the pipeline without Gmail")
     parser.add_argument("--demo-reset", action="store_true",
-                        help="wipe applications and seed the demo starting point (keeps settings)")
+                        help="mock mode only: wipe and seed the demo starting point (keeps settings)")
+    parser.add_argument("--wipe", action="store_true",
+                        help="delete all applications and history to start over (asks first; keeps settings)")
     args = parser.parse_args()
 
     conn = db.init_db()
@@ -91,8 +94,22 @@ def main():
           f"Tracker: {config.TRACKER_BACKEND}.")
     print(f"Database ready at {config.DB_PATH.name}: {', '.join(db.table_names(conn))}")
 
+    if config.LLM_MODE == "live" and (args.demo_reset or args.replay_fixtures):
+        print("Refusing in live mode: demo data would mix with your real applications. "
+              "Use LLM_MODE=mock with a separate DB_PATH for demos.")
+        return
+
     if args.demo_reset:
-        demo_reset(conn)
+        wipe(conn, seed=DEMO_SEED)
+        return
+
+    if args.wipe:
+        answer = input("This deletes every application, event, and outreach record (settings and logins stay). "
+                       "Type WIPE to continue: ")
+        if answer.strip() == "WIPE":
+            wipe(conn)
+        else:
+            print("Nothing deleted.")
         return
 
     if args.replay_fixtures:

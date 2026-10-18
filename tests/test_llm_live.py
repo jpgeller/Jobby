@@ -25,7 +25,7 @@ def fake(monkeypatch):
 
     def install(*responses):
         messages = FakeMessages(responses)
-        monkeypatch.setattr(llm, "_client", NS(messages=messages))
+        monkeypatch.setattr(llm, "_client", NS(messages=messages, beta=NS(messages=messages)))
         return messages
     return install
 
@@ -86,3 +86,12 @@ def test_research_falls_back_to_search_results_without_citations(fake):
     fake(NS(content=[search, NS(type="text", text="SUMMARY: x", citations=None)], stop_reason="end_turn",
             stop_details=None))
     assert llm.ask_claude_research("Company: Acme", task="research_company")[1] == [{"title": "A", "url": "https://a.example"}]
+
+
+def test_sonnet_requests_opt_into_refusal_fallback(fake):
+    messages = fake(text_reply("ok"), text_reply("ok"))
+    llm.ask_claude("x", task="t", model="claude-sonnet-5-5")
+    llm.ask_claude("x", task="t", model="claude-haiku-5-5")
+    sonnet, haiku = messages.requests
+    assert sonnet["fallbacks"] == "default" and sonnet["betas"] == ["server-side-fallback-2026-07-01"]
+    assert "fallbacks" not in haiku and "betas" not in haiku

@@ -67,7 +67,7 @@ def ask_claude_research(prompt, *, task, system=None, model=None, max_searches=5
         kwargs["system"] = system
     blocks = []
     for _ in range(5):  # pause_turn: the server's search loop hit its limit; resend to resume
-        response = _client.messages.create(messages=messages, **kwargs)
+        response = _create(messages=messages, **kwargs)
         blocks += response.content
         if response.stop_reason != "pause_turn":
             break
@@ -97,6 +97,14 @@ def _sources(blocks):
 _client = None
 
 
+def _create(**kwargs):
+    """Sonnet requests opt into server-side refusal fallback: if Sonnet declines, the API reruns the
+    request on Anthropic's recommended fallback model instead of returning a refusal. Haiku has none."""
+    if kwargs["model"].startswith("claude-sonnet"):
+        return _client.beta.messages.create(betas=["server-side-fallback-2026-07-01"], fallbacks="default", **kwargs)
+    return _client.messages.create(**kwargs)
+
+
 def _ensure_client():
     global _client
     if _client is None:
@@ -116,7 +124,7 @@ def _live(content, system, model, schema, max_tokens):
     if schema:
         kwargs["output_config"] = {"format": {"type": "json_schema", "schema": schema}}
 
-    response = _client.messages.create(**kwargs)
+    response = _create(**kwargs)
     if response.stop_reason == "refusal":
         raise LLMError(f"Claude declined the request ({response.stop_details})")
     if response.stop_reason == "max_tokens":
