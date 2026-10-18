@@ -106,3 +106,13 @@ def test_deadlines_become_events(conn):
         ("Deadline: Complete HackerRank OA - Northwind Robotics", "2026-10-19T23:29:00-07:00", "2026-10-19T23:59:00-07:00"),
         ("Deadline: Sign and return offer letter - Quanta Labs", "2026-10-30T23:29:00-07:00", "2026-10-30T23:59:00-07:00"),
     ]
+
+
+def test_no_role_matches_single_application_or_asks(conn, monkeypatch):
+    import classifier
+    emails = {e["id"]: e for e in main.load_fixture_emails()}
+    pipeline.process_email(conn, emails["fixture-03"])  # Northwind interview
+    resched = dict(classifier.classify_email(emails["fixture-04"]), role=None)
+    assert pipeline.process_email(conn, emails["fixture-04"], resched)["action"] == "updated"
+    unknown = dict(resched, company="Brand New Co")
+    assert pipeline.process_email(conn, dict(emails["fixture-04"], id="x"), unknown)["action"] == "needs_review"

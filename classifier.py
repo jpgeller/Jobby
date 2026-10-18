@@ -1,6 +1,8 @@
 """Turn one email into structured JSON (spec Section 5)."""
 import html
 import re
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import config
 import llm
@@ -60,7 +62,7 @@ Categories:
 Rules:
 - confidence is 0-1: how sure you are of the category.
 - company is the hiring company (never "Handshake" or "Interstride"). role is the exact job title. Use null if unknown.
-- Resolve relative dates ("next Tuesday") using the received date. Write datetimes as ISO 8601 with UTC offset, in the {config.TIMEZONE} timezone unless the email names another.
+- Resolve relative dates ("next Tuesday") using the received date. A date written without a year is its next occurrence on or after the received date, almost always the same year; if a weekday is given, check it matches the year you chose. Write datetimes as ISO 8601 with UTC offset, in the {config.TIMEZONE} timezone unless the email names another.
 - event: set it for interviews and assessments with a scheduled time. If the email asks the student to book a slot but gives no time, set needs_scheduling=true, start/end null, and next_step "Book interview slot". Otherwise null.
 - deadline: the due date for an assessment, offer response, or similar; else null.
 - next_step: a short action for the student, e.g. "Complete HackerRank OA"; null if none.
@@ -90,8 +92,42 @@ def classify_email(email):
                                  model=config.MODEL_FAST, max_tokens=2048)
     if result.get("category") not in CATEGORIES:
         raise llm.LLMError(f"Unknown category {result.get('category')!r}")
+    _fix_years(result, email["received"])
     relevant = result["category"] != "not_relevant"
-    result["needs_review"] = relevant and (
-        result["confidence"] < MIN_CONFIDENCE or not result["company"] or not result["role"]
-    )
+    # A missing role is fine here: the pipeline matches on company alone when only one
+    # application exists there, and asks you otherwise.
+    result["needs_review"] = relevant and (result["confidence"] < MIN_CONFIDENCE or not result["company"])
     return result
+
+
+def _fix_years(result, received):
+    """Make every date safe to use: a missing time zone means the user's, a bare date means 11:59 PM
+    that day, and a date 300+ days after the email almost always means the model picked the wrong
+    year for a date written without one."""
+    tz = ZoneInfo(config.TIMEZONE)
+    received_at = datetime.fromisoformat(received)
+    if received_at.tzinfo is None:
+        received_at = received_at.replace(tzinfo=tz)
+
+    def fix(value):
+        if not value:
+            return value
+        try:
+            dt = datetime.fromisoformat(value)
+        except ValueError:
+            return None  # unparseable: better no date than a wrong one
+        if "T" not in value:
+            dt = dt.replace(hour=23, minute=59)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=tz)
+        value = dt.isoformat()
+        if dt - received_at > timedelta(days=300):
+            earlier = dt.replace(year=dt.year - 1)
+            if earlier >= received_at - timedelta(days=1):
+                return earlier.isoformat()
+        return value
+
+    result["deadline"] = fix(result["deadline"])
+    if result["event"]:
+        result["event"]["start"] = fix(result["event"]["start"])
+        result["event"]["end"] = fix(result["event"]["end"])

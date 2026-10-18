@@ -47,6 +47,9 @@ def _apply(conn, email, result):
     app = dedup.find_application(conn, result["company"], result["role"])
 
     if app is None:
+        if not result["role"]:
+            # No role and no single application at this company to match: ask instead of guessing.
+            return {"action": "needs_review"}
         if proposed is None:
             # A recruiter wrote first about a role we never applied to: not an application yet.
             return {"action": "recruiter_lead"}

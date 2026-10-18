@@ -54,7 +54,7 @@ def ask_claude_vision(images, prompt, *, task, system=None, model=None, schema=N
     return _live(content, system, model, schema, max_tokens)
 
 
-def ask_claude_research(prompt, *, task, system=None, model=None, max_searches=5, max_tokens=8000):
+def ask_claude_research(prompt, *, task, system=None, model=None, max_searches=10, max_tokens=8000):
     """Prompt with the server-side web search tool. Returns (text, sources), where sources is a
     list of {"title", "url"} the answer cited (or, failing that, the search results)."""
     if config.LLM_MODE == "mock":
