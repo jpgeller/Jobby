@@ -93,7 +93,10 @@ class ImportSession:
         """Insert the items. Returns (imported, skipped_as_already_tracked)."""
         imported = skipped = 0
         for item in self.items:
-            if dedup.find_application(conn, item["company"], item["role"]):
+            existing = dedup.find_application(conn, item["company"], item["role"])
+            if existing:
+                if not existing["role"]:
+                    db.update_application(conn, existing["id"], role=item["role"])  # screenshot knows the role
                 skipped += 1
                 continue
             db.insert_application(conn, company=item["company"], company_norm=dedup.normalize_company(item["company"]),

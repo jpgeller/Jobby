@@ -114,5 +114,27 @@ def test_no_role_matches_single_application_or_asks(conn, monkeypatch):
     pipeline.process_email(conn, emails["fixture-03"])  # Northwind interview
     resched = dict(classifier.classify_email(emails["fixture-04"]), role=None)
     assert pipeline.process_email(conn, emails["fixture-04"], resched)["action"] == "updated"
-    unknown = dict(resched, company="Brand New Co")
-    assert pipeline.process_email(conn, dict(emails["fixture-04"], id="x"), unknown)["action"] == "needs_review"
+    unknown = dict(resched, company="Brand New Co")  # no role, but the company is new: track it
+    assert pipeline.process_email(conn, dict(emails["fixture-04"], id="x"), unknown)["action"] == "created"
+
+
+def test_confirmation_without_role_creates_then_fills_role(conn):
+    import classifier
+    emails = {e["id"]: e for e in main.load_fixture_emails()}
+    conf = dict(classifier.classify_email(emails["fixture-01"]), role=None)
+    out = pipeline.process_email(conn, emails["fixture-01"], conf)
+    assert out["action"] == "created" and db.get_application(conn, out["application_id"])["role"] == ""
+    out2 = pipeline.process_email(conn, emails["fixture-02"])  # OA email names the role
+    assert out2["application_id"] == out["application_id"]
+    app = db.get_application(conn, out["application_id"])
+    assert app["role"] == "Software Engineering Intern, Summer 2027" and app["status"] == "assessment"
+    assert len(db.list_applications(conn)) == 1
+
+
+def test_no_role_with_several_applications_asks(conn):
+    import classifier
+    emails = {e["id"]: e for e in main.load_fixture_emails()}
+    for role in ["SWE Intern", "Data Intern"]:
+        db.insert_application(conn, company="Northwind Robotics", company_norm="northwind robotics", role=role)
+    conf = dict(classifier.classify_email(emails["fixture-01"]), role=None)
+    assert pipeline.process_email(conn, emails["fixture-01"], conf)["action"] == "needs_review"

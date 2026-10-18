@@ -47,8 +47,8 @@ def _apply(conn, email, result):
     app = dedup.find_application(conn, result["company"], result["role"])
 
     if app is None:
-        if not result["role"]:
-            # No role and no single application at this company to match: ask instead of guessing.
+        if not result["role"] and dedup.applications_at(conn, result["company"]):
+            # Several applications at this company and the email doesn't say which: ask.
             return {"action": "needs_review"}
         if proposed is None:
             # A recruiter wrote first about a role we never applied to: not an application yet.
@@ -57,7 +57,7 @@ def _apply(conn, email, result):
             conn,
             company=result["company"],
             company_norm=dedup.normalize_company(result["company"]),
-            role=result["role"],
+            role=result["role"] or "",  # Handshake confirmations often don't name the role
             source=source_from_sender(email["from"]),
             status=proposed,
             applied_date=email["received"][:10],
@@ -69,6 +69,8 @@ def _apply(conn, email, result):
         app_id, current = app["id"], app["status"]
         new = dedup.next_status(current, proposed)
         fields = {}
+        if not app["role"] and result["role"]:
+            fields["role"] = result["role"]  # a later email finally names the role
         if new != current:
             fields["status"] = new
         # Only an email that is current (not an older stage arriving late) may change the next step.

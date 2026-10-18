@@ -32,15 +32,20 @@ def normalize_company(name):
     return re.sub(r"\s+", " ", text).strip()
 
 
+def applications_at(conn, company):
+    norm = normalize_company(company)
+    return [a for a in db.list_applications(conn) if fuzz.ratio(a["company_norm"], norm) > MATCH_THRESHOLD]
+
+
 def find_application(conn, company, role):
     """Return the matching applications row, or None."""
-    norm = normalize_company(company)
-    candidates = [a for a in db.list_applications(conn)
-                  if fuzz.ratio(a["company_norm"], norm) > MATCH_THRESHOLD]
+    candidates = applications_at(conn, company)
     if not candidates:
         return None
     if not role:
         return candidates[0] if len(candidates) == 1 else None
+    if len(candidates) == 1 and not candidates[0]["role"]:
+        return candidates[0]  # role unknown so far (e.g. from a Handshake confirmation): same application
 
     scored = [(fuzz.token_set_ratio(a["role"].lower(), role.lower()), a) for a in candidates]
     score, best = max(scored, key=lambda pair: pair[0])

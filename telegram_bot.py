@@ -174,14 +174,14 @@ def format_email_outcome(outcome, email):
         return (f"I couldn't tell what this email is about:\n\"{email['subject']}\"\n"
                 "If it matters, use /add or /update.")
     if action == "recruiter_lead":
-        return f"A recruiter at {c['company']} reached out about {c['role']}: {c['summary']}"
+        return f"A recruiter at {c['company']} reached out about {c['role'] or 'a role'}: {c['summary']}"
     if action not in {"created", "updated"}:
         return None
     event = c.get("event") or {}
     when = f" - {_fmt_time(event['start'])}" if event.get("start") else ""
     old, new = outcome["old_status"], outcome["new_status"]
     if action == "created":
-        text = f"New application tracked: {c['company']} - {c['role']} ({new}){when}."
+        text = f"New application tracked: {c['company']} - {c['role'] or 'role not given'} ({new}){when}."
     elif old != new:
         text = f"{c['company']} moved to {new.capitalize()}{when}."
     elif c["category"] == "interview_reschedule":
