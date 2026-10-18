@@ -152,3 +152,26 @@ def test_draft_is_short_and_names_the_role(conn):
                                                    {"to": o["to_address"], "source": o["contact_source"], "thread_id": None}),
                              "make it shorter", {"subject": o["subject"], "body": o["body"]})
     assert "make it shorter" in revised["body"]
+
+
+def test_candidates_are_filtered_before_any_research(conn):
+    names = [a["company"] for a in outreach.candidates(conn, today=TODAY)]
+    # Northwind: recruiter emailed. Greenfield: applied 19 days ago. Pixelworks: only 3 days, so not yet.
+    assert set(names) == {"Greenfield Energy", "Northwind Robotics"}
+
+
+def test_contact_lookup_is_cached_for_30_days_and_separate_from_research(conn):
+    assert research.cached_contact(conn, "Greenfield Energy") is None
+    found = research.fetch_contact("Greenfield Energy")
+    assert found == {"contact_email": "recruiting@greenfield-energy.example",
+                     "contact_url": "https://greenfield-energy.example/careers"}
+    research.save_contact(conn, "Greenfield Energy", found)
+    assert research.cached_contact(conn, "Greenfield Energy") == found
+    assert research.cached(conn, "Greenfield Energy") is None  # a contact lookup is not full research
+    conn.execute("UPDATE company_research SET contact_checked_at = datetime('now', '-31 days')")
+    assert research.cached_contact(conn, "Greenfield Energy") is None
+
+
+def test_no_contact_found_is_remembered(conn):
+    research.save_contact(conn, "Pixelworks", {"contact_email": None, "contact_url": None})
+    assert research.cached_contact(conn, "Pixelworks") == {"contact_email": None, "contact_url": None}

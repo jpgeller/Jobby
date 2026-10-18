@@ -468,6 +468,8 @@ def build_app(conn, tracker=None, adapter=None):
         """Research, pick a contact, draft, and show the draft with buttons. Returns a status line
         for /outreach, or None if a draft was shown."""
         data = await get_research(app_row["company"], app_row["role"])
+        if not data.get("contact_email"):
+            data = {**data, **(research.cached_contact(conn, app_row["company"]) or {})}
         if given_email:
             contact = {"to": given_email, "source": "given by you with /outreach", "thread_id": None,
                        "reason": "You asked for an outreach draft."}
@@ -488,6 +490,15 @@ def build_app(conn, tracker=None, adapter=None):
             if budget <= 0:
                 break
             try:
+                if not outreach.recruiter_contact(conn, app_row["id"]):
+                    # Cheap contact lookup first (3 searches, cached 30 days); full research only if
+                    # the company publishes a recruiting address worth writing to.
+                    found = research.cached_contact(conn, app_row["company"])
+                    if found is None:
+                        found = await asyncio.to_thread(research.fetch_contact, app_row["company"])
+                        research.save_contact(conn, app_row["company"], found)
+                    if not found["contact_email"]:
+                        continue
                 if await suggest_outreach(context.bot, app_row) is None:
                     budget -= 1
             except Exception:

@@ -106,6 +106,7 @@ MIGRATIONS = [
     ("outreach", "reason", "TEXT"),
     ("company_research", "contact_email", "TEXT"),
     ("company_research", "contact_url", "TEXT"),
+    ("company_research", "contact_checked_at", "TEXT"),
 ]
 
 

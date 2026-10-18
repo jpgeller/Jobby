@@ -68,11 +68,22 @@ def history(conn, app_id):
     return {r["status"] for r in conn.execute("SELECT status FROM outreach WHERE application_id = ?", (app_id,))}
 
 
-def candidates(conn):
+def candidates(conn, today=None):
     """Applications the daily job may consider: still waiting (applied/assessment), never sent,
-    never skipped, no draft pending."""
+    never skipped, no draft pending, and already eligible under a contact rule (a recruiter emailed,
+    or applied 7+ days ago with no reply). Filtering here, before any research, keeps the daily job
+    from paying to research applications that couldn't get outreach anyway."""
+    today = today or date.today()
     apps = conn.execute("SELECT * FROM applications WHERE status IN ('applied', 'assessment') ORDER BY applied_date")
-    return [a for a in apps if not history(conn, a["id"]) & {"sent", "skipped", "suggested", "approved"}]
+    eligible = []
+    for a in apps:
+        if history(conn, a["id"]) & {"sent", "skipped", "suggested", "approved"}:
+            continue
+        waited = (a["status"] == "applied" and a["applied_date"]
+                  and (today - date.fromisoformat(a["applied_date"])).days >= NO_REPLY_DAYS)
+        if waited or recruiter_contact(conn, a["id"]):
+            eligible.append(a)
+    return eligible
 
 
 def pick_contact(conn, app, research_data, today=None, manual=False):

@@ -161,10 +161,12 @@ def _field(prompt, name):
 
 
 def _mock_research(task, prompt):
-    if task != "research_company":
-        raise LLMError(f"No mock research for task {task!r}")
     company = _field(prompt, "Company")
     slug = re.sub(r"[^a-z0-9]+", "-", company.lower()).strip("-")
+    if task == "find_contact":
+        return f"RECRUITING CONTACT:\nrecruiting@{slug}.example https://{slug}.example/careers", []
+    if task != "research_company":
+        raise LLMError(f"No mock research for task {task!r}")
     text = (FIXTURES_DIR / "llm" / "research_mock.md").read_text().format(company=company, slug=slug)
     sources = [{"title": f"{company} - About", "url": f"https://{slug}.example/about"},
                {"title": f"{company} engineering blog", "url": f"https://{slug}.example/blog"}]
