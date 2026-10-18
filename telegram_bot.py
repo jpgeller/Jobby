@@ -255,6 +255,11 @@ def build_app(conn, tracker=None, adapter=None):
         await application.bot.set_my_commands([BotCommand(name, desc) for name, desc in COMMANDS])
 
     app = Application.builder().token(config.TELEGRAM_BOT_TOKEN).post_init(set_menu).build()
+
+    async def on_error(update, context):
+        log.warning("Telegram handler error: %r", context.error)
+
+    app.add_error_handler(on_error)
     sync_lock = asyncio.Lock()  # a timer sync and a command sync must not both append rows
 
     async def sync_tracker(context=None):
@@ -334,7 +339,11 @@ def build_app(conn, tracker=None, adapter=None):
         if not text or not chat:
             return
         for chunk in prep.split_message(text):
-            await bot.send_message(chat_id=chat, text=chunk, disable_web_page_preview=True)
+            try:
+                await bot.send_message(chat_id=chat, text=chunk, disable_web_page_preview=True)
+            except Exception as e:
+                # A Telegram hiccup must never stop the work around it (e.g. an inbox catch-up).
+                log.warning("Telegram message not delivered (%s): %s", e, chunk[:80])
 
     async def get_research(company, role):
         data = research.cached(conn, company)
