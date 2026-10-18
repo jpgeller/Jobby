@@ -195,6 +195,39 @@ def format_email_outcome(outcome, email):
     return text
 
 
+QUIET_BATCH = 10
+
+
+def format_batch_summary(done, prep_count):
+    """One message for a big catch-up: counts, status changes, and emails that need a look."""
+    created = [o for o, _ in done if o["action"] == "created"]
+    moved = [o for o, _ in done if o["action"] == "updated" and o.get("old_status") != o.get("new_status")]
+    review = [e for o, e in done if o["action"] == "needs_review"]
+    leads = [o for o, _ in done if o["action"] == "recruiter_lead"]
+    lines = [f"Caught up on {len(done)} emails: {len(created)} applications tracked, "
+             f"{len(moved)} status changes, {len(leads)} recruiter messages, {len(review)} to check."]
+    final = {}
+    for o, _ in done:  # the latest status per application
+        if o.get("application_id") and o.get("new_status"):
+            final[o["application_id"]] = (o["classification"]["company"], o["new_status"])
+    if final:
+        lines += ["", "Tracked:"] + [f"• {company} - {status}" for company, status in final.values()]
+    if review:
+        lines += ["", "I couldn't tell what these are about:"] + [f"• {e['subject'][:80]}" for e in review[:10]]
+        if len(review) > 10:
+            lines.append(f"• ...and {len(review) - 10} more")
+        lines.append("Use /add or /update if any of them matter.")
+    if prep_count:
+        lines += ["", f"Prep guides coming for {prep_count} upcoming interview(s)."]
+    lines += ["", "Use /status for the full list."]
+    return "\n".join(lines)
+
+
+def _is_future_event(conn, event_id):
+    row = conn.execute("SELECT start FROM events WHERE id = ?", (event_id,)).fetchone()
+    return bool(row and row["start"]) and datetime.fromisoformat(row["start"]) > datetime.now(TZ)
+
+
 def _fmt_time(value):
     dt = datetime.fromisoformat(value) if isinstance(value, str) else value
     return dt.astimezone(TZ).strftime("%a %b %-d, %-I:%M %p")
@@ -260,7 +293,13 @@ def build_app(conn, tracker=None, adapter=None):
                 return 0
             if config.LLM_MODE == "mock":  # the query already narrows to test emails; double-check
                 emails = [e for e in emails if gmail_watcher.is_test_email(e)]
-            count, new_interviews = 0, []
+            count, new_interviews, done = 0, [], []
+            # A big catch-up (the first live run reads the last 30 days) gets one summary message
+            # instead of one Telegram message per email.
+            quiet = len(emails) > QUIET_BATCH
+            if quiet:
+                await send(context.bot, f"Catching up on {len(emails)} emails from the last 30 days. "
+                                        "I'll send one summary when I'm done.")
             for email in sorted(emails, key=lambda e: e["received"]):
                 try:
                     # The Claude call runs in a worker thread so the bot keeps answering during a
@@ -271,12 +310,16 @@ def build_app(conn, tracker=None, adapter=None):
                     log.exception("Could not process email %s", email["id"])
                     continue
                 count += 1
+                done.append((outcome, email))
                 text = format_email_outcome(outcome, email)
-                if text and is_new_interview(outcome):
-                    text += "\nPrep guide coming."
+                if is_new_interview(outcome) and _is_future_event(conn, outcome["event_id"]):
+                    text = (text or "") + "\nPrep guide coming."
                     new_interviews.append((outcome["application_id"], outcome["event_id"]))
-                await send(context.bot, text)
+                if not quiet:
+                    await send(context.bot, text)
                 await asyncio.sleep(0)  # let other handlers run between emails
+            if quiet and done:
+                await send(context.bot, format_batch_summary(done, len(new_interviews)))
         if count:
             await sync_tracker()
         for app_id, event_id in new_interviews:

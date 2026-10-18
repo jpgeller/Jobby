@@ -74,3 +74,19 @@ def test_notification_text():
     assert bot.format_email_outcome({"action": "unchanged", "classification": c}, {"subject": "x"}) is None
     review = bot.format_email_outcome({"action": "needs_review"}, {"subject": "Quick question"})
     assert '"Quick question"' in review
+
+
+def test_batch_summary():
+    c = lambda company: {"company": company}
+    done = [
+        ({"action": "created", "application_id": 1, "new_status": "applied", "classification": c("Acme")}, {"subject": "a"}),
+        ({"action": "updated", "application_id": 1, "old_status": "applied", "new_status": "interview",
+          "classification": c("Acme")}, {"subject": "b"}),
+        ({"action": "needs_review"}, {"subject": "Quick question about your profile"}),
+        ({"action": "ignored"}, {"subject": "newsletter"}),
+    ]
+    text = bot.format_batch_summary(done, prep_count=1)
+    assert text.startswith("Caught up on 4 emails: 1 applications tracked, 1 status changes, 0 recruiter messages, 1 to check.")
+    assert "• Acme - interview" in text and "• Acme - applied" not in text
+    assert "• Quick question about your profile" in text
+    assert "Prep guides coming for 1 upcoming interview(s)." in text
