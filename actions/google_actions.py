@@ -58,5 +58,5 @@ class GoogleActions(ActionAdapter):
             payload["threadId"] = reply_to_thread_id
         return self.gmail.users().messages().send(userId="me", body=payload).execute()["id"]
 
-    def call_reminder(self, summary):
+    def call_reminder(self, summary, context=None):
         return False  # no calls without Fo; the caller sends the summary on Telegram instead

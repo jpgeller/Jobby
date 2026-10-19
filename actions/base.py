@@ -19,6 +19,6 @@ class ActionAdapter:
         """Returns the sent message id. Only ever called for outreach approved in Telegram."""
         raise NotImplementedError
 
-    def call_reminder(self, summary: str) -> bool:
+    def call_reminder(self, summary: str, context: str | None = None) -> bool:
         """True if a call was placed."""
         raise NotImplementedError

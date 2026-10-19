@@ -371,7 +371,7 @@ def build_app(conn, tracker=None, adapter=None):
             conn.commit()
         await send(bot, text)
 
-    async def place_call(bot, row):
+    async def place_call(bot, row, requested_now=False):
         """Flow C: Fo calls with a spoken summary; if that fails, the same summary goes to Telegram."""
         reminders.mark_called(conn, row)  # first, so an overlapping job can never call twice
         saved = prep.latest_saved(row["company"])
@@ -382,7 +382,12 @@ def build_app(conn, tracker=None, adapter=None):
             log.exception("Call points failed for %s", row["company"])
             points = ["Review your prep guide", "Talk through your approach out loud", "Have your questions ready"]
         script = reminders.call_script(row, points)
-        placed, entries = await asyncio.to_thread(actions.call, adapter, "call_reminder", summary=script)
+        if requested_now:
+            why = "I asked for this call myself, just now, from Jobby's Telegram chat; I'm awake and expecting it."
+        else:
+            start = datetime.fromisoformat(row["start"]).astimezone(TZ)
+            why = f"This is my scheduled reminder: my interview starts at {start.strftime('%-I:%M %p')} Pacific, within the hour."
+        placed, entries = await asyncio.to_thread(actions.call, adapter, "call_reminder", summary=script, context=why)
         actions.record(conn, entries)
         if placed is True:
             await send(bot, f"Fo is calling you about your {row['company']} interview.")
@@ -413,7 +418,7 @@ def build_app(conn, tracker=None, adapter=None):
             await reply(update, f"{matches[0]['company']} has no scheduled interview to call you about.")
             return
         await reply(update, "Asking Fo to call you...")
-        await place_call(context.bot, event)
+        await place_call(context.bot, event, requested_now=True)
 
     async def digest_job(context):
         await send(context.bot, reminders.daily_digest(conn, format_upcoming(conn)))

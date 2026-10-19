@@ -16,6 +16,11 @@ PREAMBLE = ("Automated request from Jobby, my internship tracker. Do exactly thi
             "and reply with one line: FAILED: <reason>.\n\n")
 
 
+# Calls get their own preamble: the calendar one's "don't check for conflicts" reads, on a phone call,
+# like asking Fo to skip its safety checks, and Fo rightly refuses that.
+CALL_PREAMBLE = "Request from Jobby, my internship tracker, on my behalf. Do only this one action.\n\n"
+
+
 class FoActionError(Exception):
     pass
 
@@ -79,22 +84,23 @@ class FoActions(ActionAdapter):
             return found
         raise FoActionError(f"Fo did not send the email: {reply[:300]}")
 
-    def call_reminder(self, summary):
+    def call_reminder(self, summary, context=None):
         """Fo phones the account owner (the number on their Wajo profile) and reads the summary.
-        True only if Fo confirms the call was placed."""
+        True only if Fo confirms the call was placed. `context` says truthfully why the call is
+        happening now; Fo uses its own judgment (e.g. about the hour), which Jobby doesn't override."""
         reply = self._ask(
             "Call me now on my own phone number from my profile, and only that number - never anyone else. "
-            "Read me this reminder, then hang up:\n\n"
+            f"{context or ''}\nRead me this reminder, then hang up:\n\n"
             f"\"{summary}\"\n\n"
-            "Reply with one line: CALL_PLACED, or FAILED: <reason>")
+            "Reply with one line: CALL_PLACED, or FAILED: <reason>", preamble=CALL_PREAMBLE)
         if "CALL_PLACED" not in reply.upper():
             raise FoActionError(f"Fo did not confirm the call: {reply[:300]}")
         return True
 
     # ----- helpers -----
 
-    def _ask(self, request):
-        reply = self.ask(PREAMBLE + request)
+    def _ask(self, request, preamble=PREAMBLE):
+        reply = self.ask(preamble + request)
         if reply.get("status") != "complete":
             raise FoActionError(f"Fo {reply.get('status')}: {reply.get('response') or reply.get('progress')}")
         text = reply.get("response") or ""

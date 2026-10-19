@@ -67,7 +67,7 @@ class FakeGoogle(ActionAdapter):
         self.sent_by_google.append(subject)
         return "gmsg"
 
-    def call_reminder(self, summary):
+    def call_reminder(self, summary, context=None):
         return False
 
 
@@ -152,3 +152,12 @@ def test_email_request_states_the_approval(google):
     seen = []
     actions.call(fo(google, "FAILED: test", effect=seen.append), "send_email", **EMAIL)
     assert "tapped Approve" in seen[0]
+
+
+def test_call_states_why_and_never_asks_fo_to_skip_checks(google):
+    seen = []
+    actions.call(fo(google, "CALL_PLACED", effect=seen.append), "call_reminder", summary="Hi",
+                 context="I asked for this call myself, just now.")
+    msg = seen[0]
+    assert "I asked for this call myself, just now." in msg
+    assert "do not check" not in msg.lower() and "follow-up" not in msg.lower()
